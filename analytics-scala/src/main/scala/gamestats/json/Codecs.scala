@@ -111,6 +111,50 @@ object Codecs:
     }
 
   // ---------------------------------------------------------------------------
+  // Salida (formato de contracts/results.schema.json)
+  // ---------------------------------------------------------------------------
+
+  def encode(a: MatchAnalysis): ujson.Value =
+    // Los campos opcionales de football solo se escriben si existen:
+    // `lista ++ option` agrega el par si es Some y nada si es None.
+    val base = List(
+      "matchId"     -> ujson.Str(a.matchId),
+      "gameId"      -> ujson.Str(a.gameId),
+      "matchStats"  -> encodeMatchStats(a.matchStats)
+    )
+    val teams = a.teamStats.map(ts => "teamStats" -> ujson.Arr.from(ts.map(t => entity("teamId", t.teamId, t.metrics))))
+    val rest = List(
+      "playerStats" -> ujson.Arr.from(a.playerStats.map(p => entity("playerId", p.playerId, p.metrics))),
+      "patterns"    -> ujson.Arr.from(a.patterns.map(encodePattern))
+    )
+    ujson.Obj.from(base ++ teams ++ rest)
+
+  private def encodeMatchStats(m: MatchStats): ujson.Value =
+    val fields = List(
+      "durationSeconds" -> ujson.Num(m.durationSeconds.toDouble),
+      "totalEvents"     -> ujson.Num(m.totalEvents),
+      "playerCount"     -> ujson.Num(m.playerCount),
+      "eventsByAction"  -> sortedObj(m.eventsByAction)(n => ujson.Num(n)),
+      // winner siempre se escribe; None -> null (empate o sin datos).
+      "winner"          -> m.winner.fold[ujson.Value](ujson.Null)(ujson.Str(_))
+    )
+    ujson.Obj.from(fields ++ m.score.map(s => "score" -> sortedObj(s)(n => ujson.Num(n))))
+
+  private def encodePattern(p: Pattern): ujson.Value =
+    ujson.Obj(
+      "rule"        -> p.rule,
+      "playerId"    -> p.playerId.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
+      "description" -> p.description
+    )
+
+  private def entity(idKey: String, id: String, metrics: Map[String, Double]): ujson.Value =
+    ujson.Obj(idKey -> id, "metrics" -> sortedObj(metrics)(ujson.Num(_)))
+
+  /** Map -> objeto JSON con las claves ordenadas, para que la salida sea estable. */
+  private def sortedObj[A](m: Map[String, A])(f: A => ujson.Value): ujson.Value =
+    ujson.Obj.from(m.toList.sortBy(_._1).map((k, v) => k -> f(v)))
+
+  // ---------------------------------------------------------------------------
   // Auxiliares de entrada
   // ---------------------------------------------------------------------------
 

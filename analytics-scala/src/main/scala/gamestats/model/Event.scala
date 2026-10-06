@@ -18,7 +18,18 @@ enum Card:
 /** Acción de juego dentro de un PLAYER_ACTION. `sealed` hace que el compilador
   * avise si un `match` olvida algún caso.
   */
-sealed trait GameAction
+sealed trait GameAction:
+
+  /** Nombre con el que viaja en el JSON (`action`). Se usa para `eventsByAction`. */
+  def actionName: String = this match
+    case _: LapCompleted     => "LAP_COMPLETED"
+    case _: PositionChanged  => "POSITION_CHANGED"
+    case _: Penalty          => "PENALTY"
+    case _: Pass             => "PASS"
+    case _: Shot             => "SHOT"
+    case _: Goal             => "GOAL"
+    case _: Foul             => "FOUL"
+    case UnknownAction(n, _) => n
 
 // Racing
 case class LapCompleted(lap: Int, lapTimeMs: Long, position: Int) extends GameAction
