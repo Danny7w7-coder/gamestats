@@ -21,8 +21,13 @@ object Codecs:
   def readJson(body: String): Result[ujson.Value] =
     Try(ujson.read(body)).toEither.left.map(e => s"JSON inválido: ${e.getMessage}")
 
-  /** Lote Go -> Scala. Falla si el encabezado está mal, si `events` está vacío,
-    * si cualquier evento no parsea o si algún evento es de otra partida/juego.
+  /** Lote Go -> Scala. Hay dos niveles de error:
+    *  - del LOTE (encabezado mal, `events` vacío, un evento sin eventId/timestamp/
+    *    type válidos, o de otra partida/juego): Left, el lote se rechaza (400).
+    *  - de la ACCIÓN de un evento (`data` mal formada en una acción conocida): ese
+    *    evento se descarta, queda anotado en `skipped` y la partida se analiza igual.
+    *    Go no revisa `data`, así que rechazar todo el lote haría perder la partida
+    *    entera por un solo evento.
     */
   def parseBatch(json: ujson.Value): Result[MatchBatch] =
     for
@@ -37,20 +42,39 @@ object Codecs:
       rawEvents   <- array(f, "events")
       _           <- check(rawEvents.nonEmpty, "'events' está vacío")
       // zipWithIndex + map: cada error dice en qué posición del arreglo ocurrió.
-      events      <- sequence(rawEvents.zipWithIndex.map((e, i) => parseEvent(e).left.map(msg => s"events[$i]: $msg")))
+      read        <- sequence(rawEvents.zipWithIndex.map((e, i) => readEvent(e).left.map(msg => s"events[$i]: $msg")))
+      // collect separa los eventos que quedaron de los descartados.
+      events       = read.collect { case Right(event) => event }
+      skipped      = read.collect { case Left(Skipped(id, reason)) => s"$id: $reason" }
+      _           <- check(events.nonEmpty, "todos los eventos se descartaron")
       _           <- sameAsBatch(events, "matchId", _.matchId, matchId)
       _           <- sameAsBatch(events, "gameId", _.gameId, gameId)
-    yield MatchBatch.fromEvents(matchId, gameId, gameVersion, startedAt, finishedAt, players, events)
+    yield MatchBatch.fromEvents(matchId, gameId, gameVersion, startedAt, finishedAt, players, events, skipped)
 
-  /** Un evento individual. */
+  /** Un evento individual, estricto: cualquier problema (incluida la `data` de
+    * su acción) es Left. Dentro de un lote se usa `readEvent`, que es más tolerante.
+    */
   def parseEvent(json: ujson.Value): Result[Event] =
+    readEvent(json).flatMap(_.left.map(s => s"${s.eventId}: ${s.reason}"))
+
+  /** Evento que se descarta del lote sin rechazarlo, y por qué. */
+  case class Skipped(eventId: String, reason: String)
+
+  /** Left (afuera) = evento roto, rechaza el lote.
+    * Right(Left(...)) = la acción no se pudo leer, se descarta solo este evento.
+    * Right(Right(evento)) = todo bien.
+    */
+  private def readEvent(json: ujson.Value): Result[Either[Skipped, Event]] =
     for
       f       <- asObject(json, "el evento")
       eventId <- nonEmptyStr(f, "eventId")
       // Desde aquí, cada error lleva el eventId para ubicarlo.
-      event   <- parseEventFields(eventId, f).left.map(msg => s"$eventId: $msg")
-    yield event
+      base    <- parseEventFields(eventId, f).left.map(msg => s"$eventId: $msg")
+    yield parseActionField(base.eventType, f, base.data) match
+      case Right(action) => Right(base.copy(action = action))
+      case Left(reason)  => Left(Skipped(eventId, reason))
 
+  /** Todo menos la acción (que se lee aparte para poder descartarla sola). */
   private def parseEventFields(eventId: String, f: Fields): Result[Event] =
     for
       timestamp   <- instant(f, "timestamp")
@@ -62,8 +86,7 @@ object Codecs:
       _           <- check(playerId.isDefined || !eventType.requiresPlayer, "falta 'playerId'")
       // `data` es opcional: si falta o es null se usa un objeto vacío.
       data         = f.get("data").filterNot(_.isNull).getOrElse(ujson.Obj())
-      action      <- parseActionField(eventType, f, data)
-    yield Event(eventId, timestamp, gameId, gameVersion, matchId, playerId, eventType, action, data)
+    yield Event(eventId, timestamp, gameId, gameVersion, matchId, playerId, eventType, None, data)
 
   /** Nombre de acción + `data` -> GameAction. Para agregar un juego nuevo,
     * se agregan sus casos aquí; cualquier otro nombre queda como UnknownAction.

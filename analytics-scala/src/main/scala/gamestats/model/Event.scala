@@ -57,7 +57,10 @@ case class Event(
     data: ujson.Value
 )
 
-/** Lote de una partida ya validado, con los eventos en orden cronológico. */
+/** Lote de una partida ya validado, con los eventos en orden cronológico.
+  * `skipped` lista los eventos descartados por tener la `data` de su acción
+  * mal formada ("eventId: motivo"); no participan del análisis.
+  */
 case class MatchBatch(
     matchId: String,
     gameId: String,
@@ -65,7 +68,8 @@ case class MatchBatch(
     startedAt: Instant,
     finishedAt: Instant,
     players: List[String],
-    events: List[Event]
+    events: List[Event],
+    skipped: List[String] = Nil
 )
 
 object MatchBatch:
@@ -78,7 +82,8 @@ object MatchBatch:
       startedAt: Instant,
       finishedAt: Instant,
       declaredPlayers: List[String],
-      events: List[Event]
+      events: List[Event],
+      skipped: List[String] = Nil
   ): MatchBatch =
     // sortBy: el orden siempre sale del timestamp, aunque Go mande los eventos desordenados.
     // Es estable, así que dos eventos con el mismo instante conservan el orden de llegada.
@@ -86,4 +91,4 @@ object MatchBatch:
     // flatMap sobre Option descarta los eventos sin jugador; distinct quita repetidos
     // y respeta el orden (primero los declarados, luego los que solo aparecen en eventos).
     val players = (declaredPlayers ++ sorted.flatMap(_.playerId)).distinct
-    MatchBatch(matchId, gameId, gameVersion, startedAt, finishedAt, players, sorted)
+    MatchBatch(matchId, gameId, gameVersion, startedAt, finishedAt, players, sorted, skipped)
