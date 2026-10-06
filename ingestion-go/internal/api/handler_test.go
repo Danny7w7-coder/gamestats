@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"gamestats/ingestion/internal/rejected"
+	"gamestats/ingestion/internal/state"
 )
 
 const validEv = `{"eventId":"e1","timestamp":"2026-10-05T14:01:22Z","gameId":"racing",
@@ -25,7 +26,7 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
-	return &Handler{Rejected: l}, path
+	return &Handler{Rejected: l, Store: state.NewMatchStore()}, path
 }
 
 func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
@@ -98,6 +99,25 @@ func TestEventsRejectedReason(t *testing.T) {
 	want := rejection{EventID: "e1", Reason: `la acción "GOAL" no existe en el juego "racing"`}
 	if len(resp.Rejected) != 1 || resp.Rejected[0] != want {
 		t.Fatalf("rejected = %+v, se esperaba %+v", resp.Rejected, want)
+	}
+}
+
+// Solo los eventos aceptados deben llegar al store.
+func TestMatchesAfterEvents(t *testing.T) {
+	h, _ := newTestHandler(t)
+	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1)
+	postEvents(h, "["+validEv+","+goalInRacing+"]")
+
+	req := httptest.NewRequest(http.MethodGet, "/matches", nil)
+	rec := httptest.NewRecorder()
+	h.Matches(rec, req)
+
+	var got []state.MatchInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("respuesta no es JSON: %v", err)
+	}
+	if len(got) != 1 || got[0].MatchID != "race-001" || got[0].EventCount != 1 || got[0].Status != state.StatusInProgress {
+		t.Fatalf("GET /matches = %+v", got)
 	}
 }
 

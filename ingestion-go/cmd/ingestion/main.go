@@ -8,6 +8,7 @@ import (
 
 	"gamestats/ingestion/internal/api"
 	"gamestats/ingestion/internal/rejected"
+	"gamestats/ingestion/internal/state"
 )
 
 func main() {
@@ -17,12 +18,13 @@ func main() {
 	}
 	defer rejectedLog.Close()
 
-	h := &api.Handler{Rejected: rejectedLog}
+	h := &api.Handler{Rejected: rejectedLog, Store: state.NewMatchStore()}
 
 	mux := http.NewServeMux()
 	// Desde Go 1.22 el patrón puede incluir el método: otro método recibe 405.
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("POST /events", h.Events)
+	mux.HandleFunc("GET /matches", h.Matches)
 
 	// Por ahora el puerto es fijo; en el Bloque 6 se leerá de la variable PORT.
 	addr := ":8080"
