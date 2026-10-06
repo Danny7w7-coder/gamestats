@@ -96,6 +96,32 @@ class CodecsSuite extends munit.FunSuite:
     val e = event("type" -> "PLAYER_ACTION", "action" -> "LAP_COMPLETED", "data" -> ujson.Obj("lap" -> 1, "position" -> 2))
     assertEquals(Codecs.parseEvent(e), Left("e1: LAP_COMPLETED.data: falta 'lapTimeMs'"))
 
+  // --- Eventos descartados dentro de un lote -------------------------------------
+
+  test("en un lote, una acción con data incompleta se descarta y el lote sigue"):
+    val ok  = event("eventId" -> "e1")
+    val bad = event("eventId" -> "e2", "type" -> "PLAYER_ACTION", "action" -> "LAP_COMPLETED",
+      "data" -> ujson.Obj("lap" -> 1, "position" -> 2))
+    val b = Codecs.parseBatch(batch(ok, bad)).fold(fail(_), identity)
+    assertEquals(b.events.map(_.eventId), List("e1"))
+    assertEquals(b.skipped, List("e2: LAP_COMPLETED.data: falta 'lapTimeMs'"))
+
+  test("en un lote, un PLAYER_ACTION sin 'action' se descarta"):
+    val bad = event("eventId" -> "e2", "type" -> "PLAYER_ACTION")
+    val b = Codecs.parseBatch(batch(event(), bad)).fold(fail(_), identity)
+    assertEquals(b.skipped, List("e2: falta 'action'"))
+
+  test("si se descartan todos los eventos, el lote se rechaza"):
+    val bad = event("type" -> "PLAYER_ACTION", "action" -> "PENALTY", "data" -> ujson.Obj("seconds" -> "cinco"))
+    assertEquals(Codecs.parseBatch(batch(bad)), Left("todos los eventos se descartaron"))
+
+  test("un error del evento que no es de su acción sigue rechazando el lote"):
+    val bad = event("eventId" -> "e2", "timestamp" -> "ayer")
+    assert(Codecs.parseBatch(batch(event(), bad)).left.exists(_.startsWith("events[1]: e2: 'timestamp'")))
+
+  test("un lote sin problemas no tiene descartados"):
+    assertEquals(Codecs.parseBatch(Fixtures.json("football_match_ok.json")).map(_.skipped), Right(Nil))
+
   test("PLAYER_ACTION sin playerId produce Left"):
     val e = event("type" -> "PLAYER_ACTION", "action" -> "PENALTY", "data" -> ujson.Obj("seconds" -> 5, "reason" -> "x"))
     e.value.remove("playerId")
