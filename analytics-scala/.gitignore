@@ -1,0 +1,14 @@
+# Salidas de sbt
+target/
+project/target/
+project/project/
+
+# Metals / BSP (VS Code)
+.bsp/
+.metals/
+.bloop/
+.vscode/
+project/metals.sbt
+
+# Resultados guardados en local (RESULTS_DIR por defecto)
+results/
