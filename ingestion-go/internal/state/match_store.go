@@ -75,6 +75,17 @@ func (s *MatchStore) Record(e model.Event) {
 	}
 }
 
+// SetStatus cambia el estado de una partida que ya existe (por ejemplo, a
+// enviada o error_envio después de intentar mandarla a Scala).
+func (s *MatchStore) SetStatus(matchID, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if m, ok := s.matches[matchID]; ok {
+		m.status = status
+	}
+}
+
 // Status devuelve el estado de una partida. ok es false si no existe.
 func (s *MatchStore) Status(matchID string) (status string, ok bool) {
 	s.mu.RLock()
