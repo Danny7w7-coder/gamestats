@@ -11,6 +11,109 @@ GameStats usa dos paradigmas a propósito: la ingestión está escrita en **Go**
 
 *Sección a cargo de Dylan.*
 
+> **ESQUEMA DE TRABAJO: reemplazar por el texto final.** Abajo están las preguntas guía de cada apartado y datos concretos del código para responderlas. La sección de Scala usa la estructura Ventajas → Limitaciones → Resumen; conviene seguir la misma para que el documento quede parejo.
+
+**Párrafo de apertura (ideas para escribirlo):**
+- El módulo `ingestion-go/` tiene unas 1700 líneas de código (más unas 1400 de tests, 36 funciones `Test`) y usa solo la librería estándar.
+- Ejemplo de estilo: con las reglas de Danny ("sin `var`", "funciones puras"...), ¿cuáles serían las reglas de Go? Algunas ideas: estado mutable, pero con un dueño claro; un channel para cada flujo de datos; los errores como valores (`error`) y no como excepciones; código directo, sin abstracciones.
+- ¿Dónde vive el estado mutable? En el store (`state/match_store.go`), el log de rechazados (`rejected/log.go`), el mapa del router (`pipeline/dispatcher.go`) y el slice de eventos de cada partida (`collect`).
+
+### Ventajas
+
+#### 1. ¿Por qué la ingestión se beneficia de un estilo imperativo?
+
+Preguntas guía:
+- La ingestión es, por naturaleza, una secuencia de pasos con efectos: leer el cuerpo, validar, registrar, reenviar, escribir el log y responder. ¿Se leería mejor como una composición de funciones?
+- ¿Qué ganas al poder modificar el estado en el lugar (agregar a un slice, incrementar un contador)?
+
+Datos del código:
+- `Validate` (`validation/validator.go`) son 7 reglas en orden, cada una con `return` temprano: el primer error corta. Se puede comparar con el `for` + `Either` de Scala, que también corta en el primer error, pero con otra sintaxis.
+- `collect` acumula con `events = append(events, e)` y después ordena **en el mismo lugar** con `sort.SliceStable`. En Scala sería una lista nueva.
+- `MatchStore.Record` actualiza el contador y el conjunto de jugadores conectados con un `switch` sobre el tipo de evento.
+- El handler (`api/handler.go`) usa un `for` con `continue` para saltar los eventos rechazados. Danny menciona en su limitación 2 que justamente eso le costó en Scala (el `Either` anidado).
+
+#### 2. ¿Qué aportaron las goroutines y los channels?
+
+Preguntas guía:
+- ¿Cómo sería el diseño de "una goroutine por partida" sin goroutines (con hilos del sistema operativo o con callbacks)?
+- ¿Por qué el router puede usar un mapa sin mutex?
+- ¿Qué significa "no comunicar compartiendo memoria; compartir memoria comunicando"?
+
+Datos del código:
+- Hay 4 lugares que lanzan goroutines: el router (`go d.route()`), una por partida (`go d.collect(...)`), `WORKERS` senders (`sender.go`) y una por partida en el simulador (`simulator.go`, función `Send`).
+- Channels: `in` (sin buffer), un canal por partida (sin buffer), `out` (buffer de 16) y `reply` (buffer de 1, para que el router no se bloquee al responder).
+- Quién cierra cada channel está documentado en el comentario de `dispatcher.go` y en `docs/ingestion-go.md`.
+- Una goroutine cuesta unos pocos KB al empezar, así que crear una por partida es barato.
+
+#### 3. Channels para el flujo, mutex para el estado consultado
+
+Preguntas guía:
+- ¿Por qué no se hizo todo con channels, o todo con mutex?
+- ¿Por qué `RWMutex` y no `Mutex` en el store?
+
+Datos del código:
+- El store usa `sync.RWMutex`: `GET /matches` usa `RLock` y el router y los senders usan `Lock`. `List()` devuelve copias.
+- El log de rechazados usa `sync.Mutex`, porque cada línea tiene que escribirse completa.
+- Hay 3 `sync.WaitGroup`: las partidas vivas (en el router), los senders y los envíos del simulador.
+
+#### 4. La librería estándar alcanzó para todo
+
+Preguntas guía:
+- ¿Qué habría hecho falta en otro lenguaje (un framework web, una librería de JSON, una de logs)?
+- ¿Qué ventaja tiene para el CI y para Docker no tener dependencias?
+
+Datos del código:
+- `net/http` con patrones por método (`"POST /events"`, desde Go 1.22), `http.MaxBytesReader` para limitar el cuerpo y `http.Client` con `Timeout`.
+- `encoding/json` con `json.RawMessage`: `data` pasa a Scala sin interpretarse, y por eso el sistema es genérico.
+- `httptest.NewServer` simula a Scala en los tests del cliente (éxito, fallo que se recupera, fallo total, `4xx` sin reintento, timeout y Scala caído).
+- `go.mod` no tiene `require`: no hay `go.sum` y el Dockerfile no necesita `go mod download`. La imagen final es Alpine con dos binarios estáticos (`CGO_ENABLED=0`).
+- `go test -race` viene incluido y detecta data races sin instalar nada (en Linux, porque en Windows necesita gcc).
+
+#### 5. Los errores como valores
+
+Preguntas guía:
+- ¿Qué tienen en común `if err != nil` y el `Either` de Scala, y en qué se diferencian?
+
+Datos del código:
+- `ScalaClient.post` devuelve `(retry bool, err error)`: el error dice qué pasó y `retry` dice si vale la pena reintentar (un `4xx` no se reintenta; un `5xx` o un timeout sí).
+- `config.Load` devuelve un error si `WORKERS` o `IDLE_TIMEOUT` son inválidos, y el servidor no arranca.
+
+### Limitaciones
+
+#### 1. ¿Qué fue difícil?
+
+Preguntas guía y datos para elegir (tomar 3 o 4 que se puedan contar bien):
+- **Cerrar los channels en el orden correcto.** `out` solo se puede cerrar cuando todas las goroutines de partida terminaron, de lo contrario un envío a un channel cerrado hace `panic`. Por eso se usa el `WaitGroup` dentro del router. El compilador no ayuda: es un error que aparece en ejecución.
+- **El compilador no detecta data races.** Hay que correr `go test -race`, y solo detecta las races que ocurren durante el test. En Scala, la inmutabilidad evita el problema desde el diseño.
+- **Evento tardío.** Decidir dónde detectarlo: en el router, consultando el store, y que `Submit` espere una respuesta (canal `reply`) para poder informar el rechazo en la respuesta HTTP.
+- **Timestamps.** `"…:22Z"` y `"…:22.000Z"` son el mismo instante pero distinto texto, así que hubo que ordenar comparando `time.Time`. `Timestamp` se guarda como `string` en el struct para que un timestamp malo no rompa el decode de todo el lote.
+- **Determinismo del simulador.** El orden en que se recorre un `map` en Go es aleatorio, así que el simulador usa slices para elegir jugadores. Además, `time.Now()` y el `rand` global están prohibidos.
+- **Detalles del entorno.** PowerShell 5.1 agrega un BOM al inicio de los archivos (el handler lo quita), y `go test -race` no corre en Windows sin gcc (se corrió en Docker y en el CI).
+
+#### 2. Más código repetitivo
+
+Preguntas guía:
+- ¿Cuántas veces se escribe `if err != nil { return ... }`?
+- ¿Cómo se vería `players` (ids distintos y ordenados) en Scala, con `.distinct.sorted`, contra lo que hace `buildBatch` (un `map` de vistos, un `append` y `sort.Strings`)?
+
+#### 3. La disciplina reemplaza a las garantías
+
+Preguntas guía:
+- Que "solo el router toca el mapa" es una convención: ¿qué pasaría si alguien lo usara desde un handler?
+- `MatchInfo` se copia para que nadie lea el estado fuera del lock. ¿Qué pasaría si se devolvieran punteros?
+
+### ¿Por qué HTTP y no archivos o mensajería?
+
+Preguntas guía:
+- ¿Qué se gana con HTTP? La respuesta es inmediata (`2xx`, `4xx`, `5xx`), lo que permite decidir si reintentar. Además ambos lenguajes lo traen en su librería estándar (o casi), se prueba con `curl.exe` y con `httptest`, y en Docker basta con el nombre del servicio (`http://analytics:8081`).
+- Con **archivos** compartidos, ¿cómo sabría Go que Scala procesó una partida? Habría que vigilar carpetas, manejar archivos a medio escribir y compartir un volumen entre contenedores.
+- Con **mensajería** (Kafka, RabbitMQ), ¿qué ventaja habría (persistencia, desacople si Scala se cae)? ¿Y qué costo (otro servicio en el compose, dependencias externas)? Se puede mencionar que los reintentos con espera creciente (1, 2 y 4 s) cubren en parte el caso de que Scala esté caído.
+- Una limitación honesta: si Go se reinicia, las partidas en curso se pierden, porque todo está en memoria.
+
+### Resumen
+
+Tabla con el mismo formato que la de Scala (Ventaja | Limitación). Filas sugeridas: goroutines por partida, channels, mutex en el store, librería estándar, errores como valores.
+
 ---
 
 ## Scala — análisis (funcional)
