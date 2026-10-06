@@ -12,7 +12,8 @@
 // Dueños de los channels (quién los cierra):
 //   - in:  Close(), llamado por quien apaga el servidor. Se cierra una vez.
 //   - canal de cada partida: el router, que es el único que les envía.
-//     Lo cierra al reenviar MATCH_FINISHED (o al apagarse).
+//     Lo cierra al reenviar MATCH_FINISHED, al abandonar la partida por
+//     inactividad o al apagarse.
 //   - out: el router, después de que TODAS las goroutines de partida
 //     terminaron (las espera con un WaitGroup), porque ellas son las que
 //     envían a out.
@@ -20,6 +21,7 @@ package pipeline
 
 import (
 	"errors"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -33,6 +35,10 @@ import (
 // terminó: su lote ya se armó, así que el evento se rechaza.
 var ErrMatchFinished = errors.New("partida ya finalizada")
 
+// ErrMatchAbandoned se devuelve cuando llega un evento de una partida que se
+// abandonó por inactividad.
+var ErrMatchAbandoned = errors.New("partida abandonada por inactividad")
+
 // outBuffer deja que unas cuantas partidas terminadas esperen en el canal de
 // salida si los senders están ocupados (por ejemplo, reintentando con Scala).
 const outBuffer = 16
@@ -44,26 +50,36 @@ type submission struct {
 	reply chan error
 }
 
-// Dispatcher conecta el handler HTTP con las goroutines de cada partida.
-type Dispatcher struct {
-	in    chan submission
-	out   chan model.Batch
-	store *state.MatchStore
+// openMatch es una partida en curso, vista desde el router.
+type openMatch struct {
+	ch       chan model.Event // canal de la goroutine de la partida
+	lastSeen time.Time        // hora (real, del servidor) de su último evento
 }
 
-// New crea el dispatcher y arranca la goroutine del router.
-func New(store *state.MatchStore) *Dispatcher {
+// Dispatcher conecta el handler HTTP con las goroutines de cada partida.
+type Dispatcher struct {
+	in          chan submission
+	out         chan model.Batch
+	store       *state.MatchStore
+	idleTimeout time.Duration // sin eventos durante este tiempo, la partida se abandona
+}
+
+// New crea el dispatcher y arranca la goroutine del router. idleTimeout
+// (IDLE_TIMEOUT) debe ser mayor que 0.
+func New(store *state.MatchStore, idleTimeout time.Duration) *Dispatcher {
 	d := &Dispatcher{
-		in:    make(chan submission),
-		out:   make(chan model.Batch, outBuffer),
-		store: store,
+		in:          make(chan submission),
+		out:         make(chan model.Batch, outBuffer),
+		store:       store,
+		idleTimeout: idleTimeout,
 	}
 	go d.route()
 	return d
 }
 
 // Submit entrega un evento (ya validado) al router y espera su respuesta:
-// nil si lo aceptó, o ErrMatchFinished si la partida ya había terminado.
+// nil si lo aceptó, o ErrMatchFinished / ErrMatchAbandoned si la partida ya
+// no está en curso.
 // Se espera la respuesta porque solo el router conoce el orden real de
 // llegada, y así POST /events puede informar el rechazo con exactitud.
 // No se debe llamar después de Close.
@@ -90,52 +106,93 @@ func (d *Dispatcher) Close() {
 
 // route es la goroutine del router. El mapa matches lo usa SOLO esta
 // goroutine, por eso no necesita mutex.
+//
+// El select espera dos cosas a la vez: un evento nuevo (in) o el tic del
+// reloj que revisa si hay partidas inactivas.
 func (d *Dispatcher) route() {
-	matches := make(map[string]chan model.Event) // matchId -> canal de la partida
-	var wg sync.WaitGroup                        // goroutines de partida vivas
+	matches := make(map[string]*openMatch) // matchId -> partida en curso
+	var wg sync.WaitGroup                  // goroutines de partida vivas
 
-	for sub := range d.in {
-		e := sub.event
+	// Se revisa cada medio IDLE_TIMEOUT: una partida se abandona entre 1 y
+	// 1.5 veces IDLE_TIMEOUT después de su último evento.
+	ticker := time.NewTicker(d.idleTimeout / 2)
+	defer ticker.Stop()
 
-		// Evento tardío: si la partida ya no está en curso, su lote ya salió.
-		// Se rechaza y NO se crea una goroutine nueva.
-		if status, ok := d.store.Status(e.MatchID); ok && status != state.StatusInProgress {
-			sub.reply <- ErrMatchFinished
-			continue
+	for {
+		select {
+		case sub, ok := <-d.in:
+			if !ok {
+				// in se cerró (apagado): cerramos las partidas que quedaron
+				// abiertas (no se envían), esperamos a que todas las
+				// goroutines terminen y recién entonces cerramos out
+				// (nadie más va a enviar ahí).
+				if len(matches) > 0 {
+					log.Printf("apagado: %d partidas sin terminar no se envían a Scala", len(matches))
+				}
+				for _, m := range matches {
+					close(m.ch)
+				}
+				wg.Wait()
+				close(d.out)
+				return
+			}
+			sub.reply <- d.dispatch(sub.event, matches, &wg)
+
+		case now := <-ticker.C:
+			d.abandonIdle(now, matches)
 		}
+	}
+}
 
-		// El router es el único que registra eventos en el store, así el
-		// estado siempre refleja el orden en que el router los procesó.
-		d.store.Record(e)
-
-		ch, ok := matches[e.MatchID]
-		if !ok {
-			// Primera vez que vemos esta partida: creamos su goroutine.
-			ch = make(chan model.Event)
-			matches[e.MatchID] = ch
-			wg.Add(1)
-			go d.collect(ch, &wg)
+// dispatch entrega un evento a la goroutine de su partida (creándola si es
+// la primera vez) y devuelve la respuesta para Submit. Solo la llama el router.
+func (d *Dispatcher) dispatch(e model.Event, matches map[string]*openMatch, wg *sync.WaitGroup) error {
+	// Evento tardío: si la partida ya no está en curso, su lote ya salió (o
+	// se abandonó). Se rechaza y NO se crea una goroutine nueva.
+	if status, ok := d.store.Status(e.MatchID); ok && status != state.StatusInProgress {
+		if status == state.StatusAbandoned {
+			return ErrMatchAbandoned
 		}
-		ch <- e
-
-		if e.Type == validation.TypeMatchFinished {
-			// No habrá más eventos para esta partida: cerrar su canal hace
-			// que su goroutine salga del range y arme el lote.
-			close(ch)
-			delete(matches, e.MatchID)
-		}
-
-		sub.reply <- nil
+		return ErrMatchFinished
 	}
 
-	// in se cerró (apagado): cerramos las partidas que quedaron abiertas,
-	// esperamos a que todas las goroutines terminen y recién entonces
-	// cerramos out (nadie más va a enviar ahí).
-	for _, ch := range matches {
-		close(ch)
+	// El router es el único que registra eventos en el store, así el
+	// estado siempre refleja el orden en que el router los procesó.
+	d.store.Record(e)
+
+	m, ok := matches[e.MatchID]
+	if !ok {
+		// Primera vez que vemos esta partida: creamos su goroutine.
+		m = &openMatch{ch: make(chan model.Event)}
+		matches[e.MatchID] = m
+		wg.Add(1)
+		go d.collect(m.ch, wg)
 	}
-	wg.Wait()
-	close(d.out)
+	m.lastSeen = time.Now()
+	m.ch <- e
+
+	if e.Type == validation.TypeMatchFinished {
+		// No habrá más eventos para esta partida: cerrar su canal hace
+		// que su goroutine salga del range y arme el lote.
+		close(m.ch)
+		delete(matches, e.MatchID)
+	}
+	return nil
+}
+
+// abandonIdle abandona las partidas que llevan idleTimeout sin eventos: las
+// marca como abandonadas y cierra su canal. Como no llegó MATCH_FINISHED, su
+// goroutine termina sin armar lote (no se envían a Scala). Solo la llama el
+// router.
+func (d *Dispatcher) abandonIdle(now time.Time, matches map[string]*openMatch) {
+	for id, m := range matches {
+		if now.Sub(m.lastSeen) >= d.idleTimeout {
+			d.store.SetStatus(id, state.StatusAbandoned)
+			close(m.ch)
+			delete(matches, id) // borrar durante un range es válido en Go
+			log.Printf("partida %s abandonada: sin eventos durante %s", id, d.idleTimeout)
+		}
+	}
 }
 
 // collect es la goroutine de UNA partida: acumula sus eventos hasta que el
