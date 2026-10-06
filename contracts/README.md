@@ -1,0 +1,37 @@
+# contracts
+
+Contrato compartido entre `ingestion-go` (Go) y `analytics-scala` (Scala).
+Si algo de aquí cambia, cambia en `main` y ambos lo traen con `git pull origin main`.
+
+## Schemas (JSON Schema 2020-12)
+
+| Archivo | Qué describe |
+|---|---|
+| `event.schema.json` | Un evento. Valida el `data` de cada `type`/`action` conocido. Una `action` desconocida se acepta (Scala la guarda como `UnknownAction`). |
+| `batch.schema.json` | Cuerpo de `POST /analyze` (Go → Scala). |
+| `results.schema.json` | `MatchAnalysis` que devuelve Scala (`POST /analyze`, `GET /results`). |
+
+Decisiones:
+
+- El orden de los eventos se toma del `timestamp`; `minute` (football) es solo informativo.
+- `playerId` es obligatorio salvo en `MATCH_STARTED` y `MATCH_FINISHED`; `action` solo existe en `PLAYER_ACTION`.
+- Football: todo `GOAL` va precedido de un `SHOT` con `onTarget: true` del mismo jugador; no hay autogoles; con tarjeta roja el jugador no genera más eventos.
+- `winner`: racing → `playerId` (`ranking[0]`); football → `teamId`; empate o sin datos → `null`.
+- `score` y `teamStats` solo aparecen en football. `patterns[].playerId` es `null` en patrones de equipo.
+
+## Fixtures
+
+| Archivo | Partida | Para qué sirve |
+|---|---|---|
+| `racing_match_ok.json` | race-001 | p1 gana (vueltas 82000/81500/80900 ms, peor posición 2 → **sin** COMEBACK). p3 tiene un `PENALTY` de 5 s. |
+| `comeback_case.json` | race-002 | p3 va 3° → 2° → 1° y gana → **COMEBACK**. |
+| `football_match_ok.json` | foot-001 | A gana 2-1 (goles A, A, B → **sin** COMEBACK). p2: 3 pases, 2 exitosos. p4: 0 tiros. Un gol sin asistencia. |
+| `football_comeback.json` | foot-002 | A gana 2-1 remontando (goles B, A, A → **COMEBACK**). p4 recibe roja y no vuelve a aparecer. |
+| `invalid_missing_matchid.json` | — | Lote sin `matchId` → `400`. |
+| `invalid_bad_timestamp.json` | race-998 | Un `timestamp` que no parsea → `400`. |
+
+Probar contra Scala:
+
+```powershell
+curl.exe -X POST http://localhost:8081/analyze -H "Content-Type: application/json" --data-binary "@contracts/fixtures/racing_match_ok.json"
+```

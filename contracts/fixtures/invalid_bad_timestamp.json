@@ -1,0 +1,12 @@
+{
+  "matchId": "race-998",
+  "gameId": "racing",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-05T14:00:00Z",
+  "finishedAt": "2026-10-05T14:04:10Z",
+  "players": ["p1"],
+  "events": [
+    { "eventId": "y-e01", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-998", "type": "MATCH_STARTED", "data": { "track": "monza", "laps": 1 } },
+    { "eventId": "y-e02", "timestamp": "ayer a las 2", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-998", "playerId": "p1", "type": "PLAYER_ACTION", "action": "LAP_COMPLETED", "data": { "lap": 1, "lapTimeMs": 82000, "position": 1 } }
+  ]
+}
