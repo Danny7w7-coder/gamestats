@@ -3,21 +3,17 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
-)
 
-// healthHandler responde {"status":"ok"} para indicar que el servidor está vivo.
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
+	"gamestats/ingestion/internal/api"
+)
 
 func main() {
 	mux := http.NewServeMux()
-	// Desde Go 1.22 el patrón puede incluir el método: solo acepta GET.
-	mux.HandleFunc("GET /health", healthHandler)
+	// Desde Go 1.22 el patrón puede incluir el método: otro método recibe 405.
+	mux.HandleFunc("GET /health", api.Health)
+	mux.HandleFunc("POST /events", api.Events)
 
 	// Por ahora el puerto es fijo; en el Bloque 6 se leerá de la variable PORT.
 	addr := ":8080"
