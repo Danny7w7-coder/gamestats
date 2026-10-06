@@ -1,0 +1,63 @@
+# GameStats: levanta el sistema completo.
+#
+#   docker compose up --build          # analytics (Scala) + ingestion (Go)
+#   docker compose run --rm simulator  # envía partidas de prueba (perfil "sim")
+#
+# Dentro de Docker los servicios se llaman por su nombre (analytics,
+# ingestion), no por localhost.
+
+services:
+  # Análisis y estadísticas (Scala, de Danny).
+  analytics:
+    build: ./analytics-scala
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      RESULTS_DIR: "/data"
+    volumes:
+      # Los resultados (un JSON por partida) sobreviven a "docker compose down".
+      - analytics-results:/data
+    # Requiere que la imagen de Scala tenga curl (a coordinar con Danny).
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 20 # la JVM tarda unos segundos en arrancar
+
+  # Ingestión, validación y envío a Scala (Go).
+  ingestion:
+    build: ./ingestion-go
+    image: gamestats-ingestion
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      SCALA_URL: "http://analytics:8081"
+      WORKERS: "4"
+    # Arranca cuando Scala ya responde /health, así los primeros lotes no
+    # gastan reintentos mientras la JVM levanta.
+    depends_on:
+      analytics:
+        condition: service_healthy
+    # "healthy" cuando /health responde; el simulador espera a esto.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  # Simulador de partidas (Go). Solo corre a pedido: perfil "sim".
+  simulator:
+    build: ./ingestion-go
+    image: gamestats-ingestion
+    profiles: ["sim"]
+    entrypoint: ["/app/simulator"]
+    # Opciones por defecto; se pueden cambiar al final de "docker compose run".
+    command: ["-target", "http://ingestion:8080", "-seed", "42"]
+    depends_on:
+      ingestion:
+        condition: service_healthy
+
+volumes:
+  analytics-results:
