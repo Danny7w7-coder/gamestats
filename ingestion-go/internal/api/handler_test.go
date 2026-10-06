@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"gamestats/ingestion/internal/pipeline"
 	"gamestats/ingestion/internal/rejected"
 	"gamestats/ingestion/internal/state"
 )
@@ -25,8 +26,18 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
-	return &Handler{Rejected: l, Store: state.NewMatchStore()}, path
+	store := state.NewMatchStore()
+	d := pipeline.New(store)
+	// Alguien tiene que leer los lotes terminados; aquí solo se descartan.
+	go func() {
+		for range d.Out() {
+		}
+	}()
+	t.Cleanup(func() {
+		d.Close()
+		l.Close()
+	})
+	return &Handler{Rejected: l, Store: store, Pipeline: d}, path
 }
 
 func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
@@ -118,6 +129,26 @@ func TestMatchesAfterEvents(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].MatchID != "race-001" || got[0].EventCount != 1 || got[0].Status != state.StatusInProgress {
 		t.Fatalf("GET /matches = %+v", got)
+	}
+}
+
+// Un evento que llega después de MATCH_FINISHED (aunque sea en la misma
+// petición) se rechaza con "partida ya finalizada" y se anota en el log.
+func TestLateEventRejected(t *testing.T) {
+	h, logPath := newTestHandler(t)
+	finished := `{"eventId":"f","timestamp":"2026-10-05T14:05:00Z","gameId":"racing",
+		"gameVersion":"1.0","matchId":"race-001","type":"MATCH_FINISHED"}`
+	rec := postEvents(h, "["+validEv+","+finished+","+validEv+"]")
+
+	var resp eventsResponse
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	want := rejection{EventID: "e1", Reason: "partida ya finalizada"}
+	if resp.Accepted != 2 || len(resp.Rejected) != 1 || resp.Rejected[0] != want {
+		t.Fatalf("respuesta = %+v", resp)
+	}
+	data, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(data), "partida ya finalizada") {
+		t.Fatalf("el log no tiene el rechazo: %s", data)
 	}
 }
 

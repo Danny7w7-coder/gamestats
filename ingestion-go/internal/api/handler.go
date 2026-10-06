@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"gamestats/ingestion/internal/model"
+	"gamestats/ingestion/internal/pipeline"
 	"gamestats/ingestion/internal/rejected"
 	"gamestats/ingestion/internal/state"
 	"gamestats/ingestion/internal/validation"
@@ -21,8 +22,9 @@ const maxBodyBytes = 1 << 20
 
 // Handler agrupa los endpoints y lo que necesitan para trabajar.
 type Handler struct {
-	Rejected *rejected.Logger  // donde se anotan los eventos rechazados
-	Store    *state.MatchStore // estado de las partidas (GET /matches)
+	Rejected *rejected.Logger     // donde se anotan los eventos rechazados
+	Store    *state.MatchStore    // estado de las partidas (solo lectura aquí)
+	Pipeline *pipeline.Dispatcher // a donde van los eventos válidos
 }
 
 // rejection es un evento rechazado dentro de la respuesta de POST /events.
@@ -76,12 +78,15 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			h.reject(&resp, raw, e.EventID, err.Error())
 			continue
 		}
+		// El pipeline puede rechazarlo si la partida ya terminó.
+		if err := h.Pipeline.Submit(e); err != nil {
+			h.reject(&resp, raw, e.EventID, err.Error())
+			continue
+		}
 
 		resp.Accepted++
 		log.Printf("evento aceptado: matchId=%s eventId=%s type=%s action=%s",
 			e.MatchID, e.EventID, e.Type, e.Action)
-		// Temporal: en el Bloque 5 esto lo hará el pipeline, no el handler.
-		h.Store.Record(e)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

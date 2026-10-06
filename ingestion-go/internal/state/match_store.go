@@ -75,6 +75,18 @@ func (s *MatchStore) Record(e model.Event) {
 	}
 }
 
+// Status devuelve el estado de una partida. ok es false si no existe.
+func (s *MatchStore) Status(matchID string) (status string, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	m, ok := s.matches[matchID]
+	if !ok {
+		return "", false
+	}
+	return m.status, true
+}
+
 // List devuelve una copia de todas las partidas, ordenadas por matchId.
 // Se devuelven copias (no punteros a match) para que nadie lea el estado
 // interno fuera del lock.

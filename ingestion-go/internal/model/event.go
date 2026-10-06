@@ -22,3 +22,15 @@ type Event struct {
 	Action      string          `json:"action,omitempty"`
 	Data        json.RawMessage `json:"data,omitempty"`
 }
+
+// Batch es una partida terminada, lista para enviarse a Scala (POST /analyze).
+// Events va ordenado por timestamp.
+type Batch struct {
+	MatchID     string   `json:"matchId"`
+	GameID      string   `json:"gameId"`
+	GameVersion string   `json:"gameVersion"`
+	StartedAt   string   `json:"startedAt"`
+	FinishedAt  string   `json:"finishedAt"`
+	Players     []string `json:"players"`
+	Events      []Event  `json:"events"`
+}
