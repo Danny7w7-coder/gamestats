@@ -1,0 +1,43 @@
+# CI del módulo de ingestión (Go).
+name: CI Go
+
+on:
+  push:
+    branches: [go, main]
+    paths:
+      - "ingestion-go/**"
+      - "contracts/**" # los tests de validación leen los fixtures
+      - ".github/workflows/ci-go.yml"
+  pull_request:
+    paths:
+      - "ingestion-go/**"
+      - "contracts/**"
+      - ".github/workflows/ci-go.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingestion-go
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ingestion-go/go.mod
+          # Sin dependencias externas no hay go.sum que cachear.
+          cache: false
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: docker build
+        run: docker build -t gamestats-ingestion .
