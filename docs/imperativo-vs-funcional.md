@@ -9,110 +9,201 @@ GameStats usa dos paradigmas a propósito: la ingestión está escrita en **Go**
 
 ## Go — ingestión (imperativo)
 
-*Sección a cargo de Dylan.*
+El módulo de ingestión (`ingestion-go/`, unas 1700 líneas más unas 1400 de tests) recibe los eventos, los valida, los agrupa por partida y envía cada partida terminada a Scala. Solo usa la librería estándar de Go. Se escribió con estas reglas:
 
-> **ESQUEMA DE TRABAJO: reemplazar por el texto final.** Abajo están las preguntas guía de cada apartado y datos concretos del código para responderlas. La sección de Scala usa la estructura Ventajas → Limitaciones → Resumen; conviene seguir la misma para que el documento quede parejo.
+- **Estado mutable, pero con un dueño claro**: cada dato lo modifica una sola goroutine, o está protegido por un mutex.
+- **Channels para pasar datos y coordinar el flujo; mutex para el estado compartido que se consulta.**
+- **Errores como valores** (`error`), revisados en el momento con `if err != nil`, sin excepciones.
+- **Código directo**: ciclos, `switch` y `return` temprano, sin abstracciones que no hagan falta.
 
-**Párrafo de apertura (ideas para escribirlo):**
-- El módulo `ingestion-go/` tiene unas 1700 líneas de código (más unas 1400 de tests, 36 funciones `Test`) y usa solo la librería estándar.
-- Ejemplo de estilo: con las reglas de Danny ("sin `var`", "funciones puras"...), ¿cuáles serían las reglas de Go? Algunas ideas: estado mutable, pero con un dueño claro; un channel para cada flujo de datos; los errores como valores (`error`) y no como excepciones; código directo, sin abstracciones.
-- ¿Dónde vive el estado mutable? En el store (`state/match_store.go`), el log de rechazados (`rejected/log.go`), el mapa del router (`pipeline/dispatcher.go`) y el slice de eventos de cada partida (`collect`).
+El estado mutable quedó en cuatro lugares: el mapa del router (`pipeline/dispatcher.go`), el slice de eventos de cada partida (`collect`, en el mismo archivo), el store de partidas (`state/match_store.go`) y el log de rechazados (`rejected/log.go`). Los dos primeros los toca una sola goroutine; los dos últimos están protegidos con un mutex.
 
 ### Ventajas
 
-#### 1. ¿Por qué la ingestión se beneficia de un estilo imperativo?
+#### 1. La ingestión es una secuencia de pasos con efectos, y el estilo imperativo la describe tal cual
 
-Preguntas guía:
-- La ingestión es, por naturaleza, una secuencia de pasos con efectos: leer el cuerpo, validar, registrar, reenviar, escribir el log y responder. ¿Se leería mejor como una composición de funciones?
-- ¿Qué ganas al poder modificar el estado en el lugar (agregar a un slice, incrementar un contador)?
+Recibir un evento implica leer el cuerpo, validar, registrar el estado, reenviar, escribir en el log de rechazados y responder. Casi todo es un efecto. El handler de `POST /events` (`api/handler.go`) se lee como esa lista de pasos:
 
-Datos del código:
-- `Validate` (`validation/validator.go`) son 7 reglas en orden, cada una con `return` temprano: el primer error corta. Se puede comparar con el `for` + `Either` de Scala, que también corta en el primer error, pero con otra sintaxis.
-- `collect` acumula con `events = append(events, e)` y después ordena **en el mismo lugar** con `sort.SliceStable`. En Scala sería una lista nueva.
-- `MatchStore.Record` actualiza el contador y el conjunto de jugadores conectados con un `switch` sobre el tipo de evento.
-- El handler (`api/handler.go`) usa un `for` con `continue` para saltar los eventos rechazados. Danny menciona en su limitación 2 que justamente eso le costó en Scala (el `Either` anidado).
+```go
+for _, raw := range raws {
+    var e model.Event
+    if err := json.Unmarshal(raw, &e); err != nil {
+        h.reject(&resp, raw, e.EventID, "el evento no tiene el formato esperado: "+err.Error())
+        continue
+    }
+    if err := validation.Validate(e); err != nil {
+        h.reject(&resp, raw, e.EventID, err.Error())
+        continue
+    }
+    if err := h.Pipeline.Submit(e); err != nil {
+        h.reject(&resp, raw, e.EventID, err.Error())
+        continue
+    }
+    resp.Accepted++
+}
+```
 
-#### 2. ¿Qué aportaron las goroutines y los channels?
+Un evento malo se salta con `continue` y los demás siguen. Es justamente el caso que en Scala obligó a usar un `Either` dentro de otro (limitación 2 de la sección de Scala): aquí es una línea.
 
-Preguntas guía:
-- ¿Cómo sería el diseño de "una goroutine por partida" sin goroutines (con hilos del sistema operativo o con callbacks)?
-- ¿Por qué el router puede usar un mapa sin mutex?
-- ¿Qué significa "no comunicar compartiendo memoria; compartir memoria comunicando"?
+`Validate` (`validation/validator.go`) sigue el mismo estilo. Son siete reglas en orden y cada una devuelve su motivo apenas falla:
 
-Datos del código:
-- Hay 4 lugares que lanzan goroutines: el router (`go d.route()`), una por partida (`go d.collect(...)`), `WORKERS` senders (`sender.go`) y una por partida en el simulador (`simulator.go`, función `Send`).
-- Channels: `in` (sin buffer), un canal por partida (sin buffer), `out` (buffer de 16) y `reply` (buffer de 1, para que el router no se bloquee al responder).
-- Quién cierra cada channel está documentado en el comentario de `dispatcher.go` y en `docs/ingestion-go.md`.
-- Una goroutine cuesta unos pocos KB al empezar, así que crear una por partida es barato.
+```go
+actions, ok := GameActions[e.GameID]
+if !ok {
+    return fmt.Errorf("gameId desconocido: %q", e.GameID)
+}
+if !eventTypes[e.Type] {
+    return fmt.Errorf("type desconocido: %q", e.Type)
+}
+```
 
-#### 3. Channels para el flujo, mutex para el estado consultado
+Modificar en el lugar también simplificó el armado del lote. La goroutine de cada partida hace `events = append(events, e)` y, al terminar, ordena ese mismo slice con `sort.SliceStable`, sin crear copias.
 
-Preguntas guía:
-- ¿Por qué no se hizo todo con channels, o todo con mutex?
-- ¿Por qué `RWMutex` y no `Mutex` en el store?
+#### 2. Las goroutines hacen barato el diseño "una por partida"
 
-Datos del código:
-- El store usa `sync.RWMutex`: `GET /matches` usa `RLock` y el router y los senders usan `Lock`. `List()` devuelve copias.
-- El log de rechazados usa `sync.Mutex`, porque cada línea tiene que escribirse completa.
-- Hay 3 `sync.WaitGroup`: las partidas vivas (en el router), los senders y los envíos del simulador.
+Cada partida tiene su propia goroutine, que acumula sus eventos y arma el lote al recibir `MATCH_FINISHED`. Una goroutine arranca con unos pocos KB de pila, así que crear una por partida no cuesta casi nada. Con hilos del sistema operativo este diseño sería caro, y con callbacks habría que guardar a mano el estado de cada partida entre llamadas.
 
-#### 4. La librería estándar alcanzó para todo
+En total hay cuatro lugares que lanzan goroutines: el router (`go d.route()`), una por partida (`go d.collect(...)`), `WORKERS` senders que envían a Scala (`pipeline/sender.go`) y, en el simulador, una por partida para que los eventos lleguen mezclados (`simulator/simulator.go`).
 
-Preguntas guía:
-- ¿Qué habría hecho falta en otro lenguaje (un framework web, una librería de JSON, una de logs)?
-- ¿Qué ventaja tiene para el CI y para Docker no tener dependencias?
+#### 3. Los channels reemplazan a los locks en el flujo de datos
 
-Datos del código:
-- `net/http` con patrones por método (`"POST /events"`, desde Go 1.22), `http.MaxBytesReader` para limitar el cuerpo y `http.Client` con `Timeout`.
-- `encoding/json` con `json.RawMessage`: `data` pasa a Scala sin interpretarse, y por eso el sistema es genérico.
-- `httptest.NewServer` simula a Scala en los tests del cliente (éxito, fallo que se recupera, fallo total, `4xx` sin reintento, timeout y Scala caído).
-- `go.mod` no tiene `require`: no hay `go.sum` y el Dockerfile no necesita `go mod download`. La imagen final es Alpine con dos binarios estáticos (`CGO_ENABLED=0`).
-- `go test -race` viene incluido y detecta data races sin instalar nada (en Linux, porque en Windows necesita gcc).
+Los eventos pasan de una goroutine a otra: handler → router → partida → sender. Como cada dato tiene un solo dueño a la vez, no hay nada que proteger. El router mantiene un mapa `matchId → canal de la partida` **sin mutex**, porque es la única goroutine que lo usa:
 
-#### 5. Los errores como valores
+```go
+for sub := range d.in {
+    e := sub.event
+    if status, ok := d.store.Status(e.MatchID); ok && status != state.StatusInProgress {
+        sub.reply <- ErrMatchFinished // evento tardío
+        continue
+    }
+    d.store.Record(e)
 
-Preguntas guía:
-- ¿Qué tienen en común `if err != nil` y el `Either` de Scala, y en qué se diferencian?
+    ch, ok := matches[e.MatchID]
+    if !ok {
+        ch = make(chan model.Event)
+        matches[e.MatchID] = ch
+        wg.Add(1)
+        go d.collect(ch, &wg)
+    }
+    ch <- e
 
-Datos del código:
-- `ScalaClient.post` devuelve `(retry bool, err error)`: el error dice qué pasó y `retry` dice si vale la pena reintentar (un `4xx` no se reintenta; un `5xx` o un timeout sí).
-- `config.Load` devuelve un error si `WORKERS` o `IDLE_TIMEOUT` son inválidos, y el servidor no arranca.
+    if e.Type == validation.TypeMatchFinished {
+        close(ch)
+        delete(matches, e.MatchID)
+    }
+    sub.reply <- nil
+}
+```
+
+Cerrar un channel también sirve como señal. Cuando el router cierra el canal de una partida, el `for e := range in` de su goroutine termina y ella sabe que ya puede armar el lote. Cuando se cierra `out`, los senders salen de su `range` y terminan. No hace falta ningún flag compartido.
+
+Los senders comparten un solo canal de salida, y Go garantiza que cada lote lo recibe uno solo de ellos. Repartir el trabajo entre `WORKERS` goroutines no necesitó código extra: si una está esperando un reintento, las demás siguen enviando.
+
+#### 4. El mutex queda para el estado que otros consultan
+
+El estado de las partidas lo escriben el router y los senders, y lo lee cualquier petición `GET /matches`, cada una en su goroutine. Ese estado no fluye: se consulta. Por eso no va por un channel, sino detrás de un `sync.RWMutex` (`state/match_store.go`):
+
+```go
+func (s *MatchStore) List() []MatchInfo {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+    // ...arma y devuelve COPIAS de cada partida
+}
+```
+
+`RLock` deja que varias lecturas vayan a la vez, y `Lock` hace que una escritura espere a quedar sola. `List` devuelve copias para que nadie lea el estado interno después de soltar el lock. El log de rechazados usa un `sync.Mutex` simple, porque cada línea tiene que escribirse completa sin mezclarse con otra.
+
+La división dio una regla fácil de aplicar en cada decisión: si el dato se *mueve*, va por un channel; si se *consulta*, va detrás de un mutex.
+
+#### 5. La librería estándar alcanzó para todo
+
+No se agregó ni una dependencia: `go.mod` no tiene `require` y no existe `go.sum`.
+
+- `net/http` trae el servidor, con rutas por método (`"POST /events"`, desde Go 1.22), `http.MaxBytesReader` para limitar el cuerpo y un `http.Client` con `Timeout`.
+- `encoding/json` con `json.RawMessage` permite reenviar `data` a Scala sin interpretarlo. Gracias a eso, Go no necesita saber nada de cada juego: agregar uno es una línea en `GameActions`.
+- `net/http/httptest` simula a Scala en los tests del cliente: éxito, fallo transitorio que se recupera, fallo total, `4xx` sin reintento, timeout y Scala caído.
+- `go test -race` detecta data races sin instalar nada (en Linux; en Windows necesita gcc).
+
+Para Docker y el CI esto simplificó todo. El Dockerfile no descarga dependencias y la imagen final es un Alpine con dos binarios estáticos (`CGO_ENABLED=0`).
+
+#### 6. Los errores como valores permiten decidir qué hacer con cada uno
+
+Un error en Go es un valor que se devuelve y se revisa en el momento. El cliente de Scala (`client/scala_client.go`) devuelve el error y además dice si vale la pena reintentar:
+
+```go
+func (c *ScalaClient) post(body []byte) (retry bool, err error)
+```
+
+Un `5xx` o un timeout se reintentan hasta 3 veces (esperando 1, 2 y 4 s). Un `4xx` no, porque el lote está mal y mandarlo otra vez no lo arregla. La idea se parece al `Either` de Scala, pero el compilador no obliga a revisar el error: la convención `if err != nil` sí.
 
 ### Limitaciones
 
-#### 1. ¿Qué fue difícil?
+#### 1. El compilador no detecta las data races
 
-Preguntas guía y datos para elegir (tomar 3 o 4 que se puedan contar bien):
-- **Cerrar los channels en el orden correcto.** `out` solo se puede cerrar cuando todas las goroutines de partida terminaron, de lo contrario un envío a un channel cerrado hace `panic`. Por eso se usa el `WaitGroup` dentro del router. El compilador no ayuda: es un error que aparece en ejecución.
-- **El compilador no detecta data races.** Hay que correr `go test -race`, y solo detecta las races que ocurren durante el test. En Scala, la inmutabilidad evita el problema desde el diseño.
-- **Evento tardío.** Decidir dónde detectarlo: en el router, consultando el store, y que `Submit` espere una respuesta (canal `reply`) para poder informar el rechazo en la respuesta HTTP.
-- **Timestamps.** `"…:22Z"` y `"…:22.000Z"` son el mismo instante pero distinto texto, así que hubo que ordenar comparando `time.Time`. `Timestamp` se guarda como `string` en el struct para que un timestamp malo no rompa el decode de todo el lote.
-- **Determinismo del simulador.** El orden en que se recorre un `map` en Go es aleatorio, así que el simulador usa slices para elegir jugadores. Además, `time.Now()` y el `rand` global están prohibidos.
-- **Detalles del entorno.** PowerShell 5.1 agrega un BOM al inicio de los archivos (el handler lo quita), y `go test -race` no corre en Windows sin gcc (se corrió en Docker y en el CI).
+En Scala, la inmutabilidad evita el problema desde el diseño. En Go, que dos goroutines escriban el mismo dato sin protección compila sin advertencias. La única defensa es correr `go test -race`, y solo detecta las races que *ocurren* durante los tests. Por eso hay tests que fuerzan la concurrencia, como `TestConcurrentSubmit`, que manda eventos desde muchas goroutines a la vez, y por eso el CI corre siempre con `-race`.
 
-#### 2. Más código repetitivo
+Además, en Windows `-race` necesita gcc. Durante el desarrollo se corrió dentro de un contenedor de Docker.
 
-Preguntas guía:
-- ¿Cuántas veces se escribe `if err != nil { return ... }`?
-- ¿Cómo se vería `players` (ids distintos y ordenados) en Scala, con `.distinct.sorted`, contra lo que hace `buildBatch` (un `map` de vistos, un `append` y `sort.Strings`)?
+#### 2. El orden de cierre de los channels es responsabilidad del programador
 
-#### 3. La disciplina reemplaza a las garantías
+Enviar a un channel cerrado provoca `panic` en ejecución, y el compilador no lo previene. El canal de salida `out` lo escriben todas las goroutines de partida, así que solo se puede cerrar cuando **todas** terminaron. El router las cuenta con un `sync.WaitGroup` y recién después cierra:
 
-Preguntas guía:
-- Que "solo el router toca el mapa" es una convención: ¿qué pasaría si alguien lo usara desde un handler?
-- `MatchInfo` se copia para que nadie lea el estado fuera del lock. ¿Qué pasaría si se devolvieran punteros?
+```go
+for _, ch := range matches {
+    close(ch)
+}
+wg.Wait()
+close(d.out)
+```
 
-### ¿Por qué HTTP y no archivos o mensajería?
+Esta regla (cada channel lo cierra quien envía en él, y una sola vez) tuvo que documentarse en un comentario al inicio de `dispatcher.go`. Que "solo el router toca el mapa" también es una convención: si mañana alguien lo usara desde un handler, compilaría igual.
 
-Preguntas guía:
-- ¿Qué se gana con HTTP? La respuesta es inmediata (`2xx`, `4xx`, `5xx`), lo que permite decidir si reintentar. Además ambos lenguajes lo traen en su librería estándar (o casi), se prueba con `curl.exe` y con `httptest`, y en Docker basta con el nombre del servicio (`http://analytics:8081`).
-- Con **archivos** compartidos, ¿cómo sabría Go que Scala procesó una partida? Habría que vigilar carpetas, manejar archivos a medio escribir y compartir un volumen entre contenedores.
-- Con **mensajería** (Kafka, RabbitMQ), ¿qué ventaja habría (persistencia, desacople si Scala se cae)? ¿Y qué costo (otro servicio en el compose, dependencias externas)? Se puede mencionar que los reintentos con espera creciente (1, 2 y 4 s) cubren en parte el caso de que Scala esté caído.
-- Una limitación honesta: si Go se reinicia, las partidas en curso se pierden, porque todo está en memoria.
+#### 3. Más código repetitivo
+
+Muchas operaciones que en Scala son una línea aquí son un ciclo. Los jugadores distintos y ordenados de una partida (`buildBatch`) se arman así:
+
+```go
+seen := make(map[string]bool)
+for _, e := range events {
+    if e.PlayerID != "" && !seen[e.PlayerID] {
+        seen[e.PlayerID] = true
+        b.Players = append(b.Players, e.PlayerID)
+    }
+}
+sort.Strings(b.Players)
+```
+
+En Scala sería algo como `events.flatMap(_.playerId).distinct.sorted`. Lo mismo pasa con `if err != nil { return ... }`, que se repite en cada llamada que puede fallar.
+
+#### 4. Detalles que costaron tiempo
+
+- **Timestamps.** `"…:22Z"` y `"…:22.000Z"` son el mismo instante, pero como texto no son iguales. Para ordenar hubo que comparar valores `time.Time`. Además, en el struct `Timestamp` es un `string` y no un `time.Time`: así un timestamp mal escrito no hace fallar el decode de todo el lote, y la validación rechaza solo ese evento.
+- **El evento tardío.** Decidir dónde detectar un evento que llega después de `MATCH_FINISHED` llevó a que `Submit` espere una respuesta del router por un canal `reply` con buffer de 1. Solo el router conoce el orden real de llegada, y así la respuesta HTTP puede informar el rechazo con exactitud.
+- **Determinismo del simulador.** En Go, el orden en que se recorre un `map` es aleatorio a propósito. Para que la misma semilla genere siempre las mismas partidas, el simulador elige los jugadores de slices y no de maps, y no usa `time.Now()` ni el generador aleatorio global.
+- **PowerShell 5.1** agrega una marca BOM al inicio de los archivos UTF-8 que genera, y `encoding/json` no la acepta. El handler la quita antes de decodificar.
+
+#### 5. Todo vive en memoria
+
+El estado de las partidas en curso está solo en la memoria del proceso. Si el servidor se reinicia, las partidas que no habían terminado se pierden. Para este proyecto es aceptable, pero un sistema real necesitaría guardarlas en disco o en una cola persistente.
+
+### ¿Por qué HTTP entre Go y Scala?
+
+- **Respuesta inmediata.** Cada envío devuelve un código (`2xx`, `4xx` o `5xx`), y con eso Go decide si la partida quedó `enviada`, si reintenta o si la marca como `error_envio`.
+- **Sin dependencias.** Go trae servidor y cliente HTTP en la librería estándar. Se prueba con `curl.exe` a mano y con `httptest` en los tests.
+- **Simple en Docker.** Cada servicio llama al otro por su nombre (`http://analytics:8081`), sin volúmenes compartidos.
+
+Con **archivos** compartidos, Go no sabría cuándo Scala procesó una partida: habría que vigilar carpetas, evitar leer archivos a medio escribir y compartir un volumen entre contenedores. Con **mensajería** (Kafka o RabbitMQ) se ganaría persistencia y desacople, porque los lotes esperarían en la cola si Scala se cae. El costo sería otro servicio en el compose y librerías externas en ambos lenguajes. Los reintentos con espera creciente cubren en parte ese caso, que es suficiente para el alcance del proyecto.
 
 ### Resumen
 
-Tabla con el mismo formato que la de Scala (Ventaja | Limitación). Filas sugeridas: goroutines por partida, channels, mutex en el store, librería estándar, errores como valores.
+| | Ventaja | Limitación |
+|---|---|---|
+| Estilo imperativo (ciclos, `continue`, `return` temprano) | El código sigue los pasos de la ingestión tal cual; saltar un evento malo es una línea | Más código repetitivo que `flatMap`/`distinct` en Scala |
+| Goroutines | Una por partida, casi sin costo | Hay que asegurar que todas terminen (`WaitGroup`) |
+| Channels | Pasan los datos sin locks; cerrarlos sirve de señal | Cerrar en el orden incorrecto da `panic` en ejecución |
+| `sync.RWMutex` en el store | Lecturas en paralelo para `GET /matches` | El compilador no avisa si se olvida el lock: solo `-race` lo detecta |
+| Librería estándar | Cero dependencias; Docker y CI simples | — |
+| Errores como valores | Cada error se decide en el momento (reintentar o no) | Nada obliga a revisarlos |
 
 ---
 

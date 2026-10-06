@@ -1,6 +1,6 @@
 # Módulo de ingestión (Go)
 
-*Borrador, a cargo de Dylan Mendez Zamora.*
+*A cargo de Dylan Mendez Zamora.*
 
 El módulo `ingestion-go/` es la puerta de entrada de GameStats. Recibe los eventos de las partidas por HTTP, valida cada uno, guarda el estado de cada partida y, cuando una partida termina, envía el lote completo al servicio de análisis en Scala (`POST /analyze`).
 
