@@ -1,11 +1,14 @@
 package gamestats.stats
 
 import gamestats.model.*
+import gamestats.rules.{RacingComebackRule, Rule}
 
 /** Análisis de carreras. Todo puro: recibe el lote y devuelve el resultado. */
 object RacingAnalyzer extends GameAnalyzer:
 
   val gameId: String = "racing"
+
+  override def rules: List[Rule] = List(RacingComebackRule)
 
   def analyze(batch: MatchBatch): MatchAnalysis =
     // groupBy por jugador; collect descarta el grupo de eventos sin jugador

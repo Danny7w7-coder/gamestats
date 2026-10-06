@@ -1,11 +1,14 @@
 package gamestats.stats
 
 import gamestats.model.*
+import gamestats.rules.{FootballComebackRule, HatTrickRule, Rule}
 
 /** Análisis de fútbol. Todo puro: recibe el lote y devuelve el resultado. */
 object FootballAnalyzer extends GameAnalyzer:
 
   val gameId: String = "football"
+
+  override def rules: List[Rule] = List(FootballComebackRule, HatTrickRule)
 
   def analyze(batch: MatchBatch): MatchAnalysis =
     val all = actions(batch.events)
