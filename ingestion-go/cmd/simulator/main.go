@@ -15,8 +15,8 @@ import (
 )
 
 func main() {
-	racing := flag.Int("racing", 4, "cuántas partidas aleatorias de racing generar")
-	football := flag.Int("football", 4, "cuántas partidas aleatorias de football generar")
+	racing := flag.Int("racing", 4, "cuántas partidas aleatorias de racing generar (además de las guionizadas)")
+	football := flag.Int("football", 4, "cuántas partidas aleatorias de football generar (además de las guionizadas)")
 	seed := flag.Int64("seed", 42, "semilla: la misma semilla genera exactamente las mismas partidas")
 	target := flag.String("target", "http://localhost:8080", "dirección del servidor de ingestión")
 	flag.Parse()
@@ -33,6 +33,12 @@ func main() {
 	}
 	fmt.Printf("seed %d: %d partidas generadas (%d eventos). Enviando a %s...\n",
 		*seed, len(matches), total, *target)
+	fmt.Println("Escenarios guionizados:")
+	for _, m := range matches {
+		if m.Script != "" {
+			fmt.Printf("  %-18s %s\n", m.ID, m.Script)
+		}
+	}
 
 	results := simulator.Send(*target, matches)
 
@@ -41,10 +47,10 @@ func main() {
 	for _, r := range results {
 		if r.Err != nil {
 			failed = true
-			fmt.Printf("  %-16s ERROR: %v\n", r.MatchID, r.Err)
+			fmt.Printf("  %-18s ERROR: %v\n", r.MatchID, r.Err)
 			continue
 		}
-		fmt.Printf("  %-16s %3d enviados, %3d aceptados, %d rechazados\n",
+		fmt.Printf("  %-18s %3d enviados, %3d aceptados, %d rechazados\n",
 			r.MatchID, r.Received, r.Accepted, len(r.Rejected))
 		for _, rj := range r.Rejected {
 			fmt.Printf("      rechazado %s\n", rj)

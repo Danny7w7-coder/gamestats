@@ -31,12 +31,14 @@ type Match struct {
 	ID     string
 	GameID string
 	Events []model.Event
+	Script string // descripción si es un escenario guionizado; vacío si es aleatoria
 }
 
-// Generate crea las partidas aleatorias de cada juego a partir de la semilla.
+// Generate crea los escenarios guionizados (siempre) y las partidas
+// aleatorias de cada juego a partir de la semilla.
 func Generate(seed int64, racing, football int) []Match {
 	r := rand.New(rand.NewSource(seed))
-	var matches []Match
+	matches := scriptedMatches(seed)
 	for i := 1; i <= racing; i++ {
 		id := fmt.Sprintf("race-s%d-%03d", seed, i)
 		start := baseTime.Add(time.Duration(i) * 15 * time.Minute)

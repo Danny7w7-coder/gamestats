@@ -10,49 +10,85 @@ var tracks = []string{"monza", "interlagos", "silverstone", "spa", "suzuka"}
 
 var penaltyReasons = []string{"track_limits", "unsafe_release", "collision"}
 
-// generateRacing simula una carrera: 3 a 6 pilotos, 3 a 5 vueltas. Cada piloto
-// tiene un ritmo base y cada vuelta varía un poco. La posición se calcula con
-// el tiempo acumulado más las penalizaciones.
+// generateRacing simula una carrera al azar: 3 a 6 pilotos, 3 a 5 vueltas.
+// Cada piloto tiene un ritmo base y cada vuelta varía un poco. Aquí solo se
+// deciden los números; buildRace arma los eventos.
 func generateRacing(r *rand.Rand, id string, start time.Time) Match {
-	b := newBuilder(id, "racing")
-	drivers := playerIDs(3 + r.Intn(4)) // 3..6
-	laps := 3 + r.Intn(3)               // 3..5
-
-	b.add(start, "MATCH_STARTED", "", "", map[string]any{"track": pick(r, tracks), "laps": laps})
-	for i, p := range drivers {
-		b.add(start.Add(time.Duration(i+1)*time.Second), "PLAYER_JOINED", p, "", map[string]any{})
-	}
+	drivers := 3 + r.Intn(4) // 3..6
+	laps := 3 + r.Intn(3)    // 3..5
+	track := pick(r, tracks)
 
 	// Ritmo base de cada piloto: entre 80 y 84 segundos por vuelta.
-	pace := make([]int, len(drivers))
+	pace := make([]int, drivers)
 	for i := range pace {
 		pace[i] = 80000 + r.Intn(4000)
 	}
 
+	lapTimes := make([][]int, laps)
+	for lap := range lapTimes {
+		lapTimes[lap] = make([]int, drivers)
+		for i := range pace {
+			lapTimes[lap][i] = pace[i] + r.Intn(3001) - 1500 // ±1.5 s
+		}
+	}
+
+	// Penalización ocasional: 12 % de los pilotos recibe una, en una vuelta al azar.
+	var penalties []racePenalty
+	for i := 0; i < drivers; i++ {
+		if r.Intn(100) < 12 {
+			penalties = append(penalties, racePenalty{
+				driver: i, lap: 1 + r.Intn(laps),
+				seconds: 5 * (1 + r.Intn(2)), // 5 o 10 s
+				reason:  pick(r, penaltyReasons),
+			})
+		}
+	}
+
+	return buildRace(id, start, track, lapTimes, penalties)
+}
+
+// racePenalty es una penalización: a qué piloto (índice), en qué vuelta,
+// cuántos segundos y por qué.
+type racePenalty struct {
+	driver  int
+	lap     int
+	seconds int
+	reason  string
+}
+
+// buildRace arma los eventos de una carrera a partir de los tiempos de cada
+// vuelta (lapTimes[vuelta][piloto], en ms) y las penalizaciones. La usan
+// tanto las carreras al azar como las guionizadas. La posición se calcula
+// con el tiempo acumulado más las penalizaciones.
+func buildRace(id string, start time.Time, track string, lapTimes [][]int, penalties []racePenalty) Match {
+	b := newBuilder(id, "racing")
+	drivers := playerIDs(len(lapTimes[0]))
+
+	b.add(start, "MATCH_STARTED", "", "", map[string]any{"track": track, "laps": len(lapTimes)})
+	for i, p := range drivers {
+		b.add(start.Add(time.Duration(i+1)*time.Second), "PLAYER_JOINED", p, "", map[string]any{})
+	}
+
 	race := newRaceState(len(drivers))
 	raceStart := start.Add(10 * time.Second)
-	penalized := make([]bool, len(drivers)) // máximo una penalización por piloto
 
-	for lap := 1; lap <= laps; lap++ {
-		lapTimes := make([]int, len(drivers))
+	for lap := 1; lap <= len(lapTimes); lap++ {
+		times := lapTimes[lap-1]
 		for i := range drivers {
-			lapTimes[i] = pace[i] + r.Intn(3001) - 1500 // ±1.5 s
-			race.driven[i] += lapTimes[i]
+			race.driven[i] += times[i]
 		}
 
-		// Penalización ocasional (3 % por piloto y vuelta), a mitad de vuelta.
-		for i, p := range drivers {
-			if !penalized[i] && r.Intn(100) < 3 {
-				penalized[i] = true
-				seconds := 5 * (1 + r.Intn(2)) // 5 o 10 s
-				race.penalty[i] += seconds * 1000
-				at := raceStart.Add(ms(race.driven[i] - lapTimes[i]/2))
-				b.add(at, "PLAYER_ACTION", p, "PENALTY",
-					map[string]any{"seconds": seconds, "reason": pick(r, penaltyReasons)})
+		// La penalización se anota a mitad de la vuelta en que ocurre.
+		for _, pen := range penalties {
+			if pen.lap == lap {
+				race.penalty[pen.driver] += pen.seconds * 1000
+				at := raceStart.Add(ms(race.driven[pen.driver] - times[pen.driver]/2))
+				b.add(at, "PLAYER_ACTION", drivers[pen.driver], "PENALTY",
+					map[string]any{"seconds": pen.seconds, "reason": pen.reason})
 			}
 		}
 
-		addLapEvents(b, drivers, race, lap, lapTimes, raceStart)
+		addLapEvents(b, drivers, race, lap, times, raceStart)
 	}
 
 	b.add(raceStart.Add(ms(race.maxDriven())+5*time.Second), "MATCH_FINISHED", "", "",
