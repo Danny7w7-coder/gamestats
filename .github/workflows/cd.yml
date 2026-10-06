@@ -1,0 +1,99 @@
+# CD de GameStats: prueba el sistema completo con docker compose, publica las
+# imágenes en GitHub Container Registry y (si está habilitado) despliega.
+#
+# - En un PR hacia main solo corre la integración (así se prueba antes de mergear).
+# - En un push a main corren los tres jobs, en orden.
+name: CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. Levanta analytics + ingestion, corre el simulador y verifica que Scala
+  #    haya guardado resultados.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Levantar analytics e ingestion (espera a que estén healthy)
+        run: docker compose up -d --build --wait
+
+      - name: Correr el simulador (seed 42)
+        run: docker compose run --rm simulator
+
+      - name: Verificar que /results no esté vacío
+        run: |
+          # Go envía los lotes a Scala en segundo plano: se espera hasta 60 s
+          # a que lleguen todas las partidas que generó el simulador.
+          expected=13
+          for i in $(seq 1 30); do
+            count=$(curl -fs http://localhost:8081/results | jq length)
+            echo "partidas en /results: $count"
+            [ "$count" -ge "$expected" ] && break
+            sleep 2
+          done
+          test "$count" -gt 0
+          curl -fs http://localhost:8081/results \
+            | jq -r '.[] | "\(.matchId)\t\(.matchStats.winner)\t\([.patterns[].rule] | join(","))"'
+
+      - name: Logs de los servicios (si algo falló)
+        if: failure()
+        run: docker compose logs
+
+      - name: Bajar todo
+        if: always()
+        run: docker compose down -v
+
+  # 2. Publica las dos imágenes en ghcr.io/<owner>/gamestats-{analytics,ingestion}.
+  publish:
+    needs: integration
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Owner en minúscula (GHCR no acepta mayúsculas)
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Construir y publicar gamestats-analytics
+        run: |
+          image=ghcr.io/$OWNER/gamestats-analytics
+          docker build -t "$image:${{ github.sha }}" -t "$image:latest" ./analytics-scala
+          docker push --all-tags "$image"
+
+      - name: Construir y publicar gamestats-ingestion
+        run: |
+          image=ghcr.io/$OWNER/gamestats-ingestion
+          docker build -t "$image:${{ github.sha }}" -t "$image:latest" ./ingestion-go
+          docker push --all-tags "$image"
+
+  # 3. Despliegue. Solo corre si la variable del repo DEPLOY_ENABLED es 'true'
+  #    (Settings > Secrets and variables > Actions > Variables).
+  deploy:
+    needs: publish
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar
+        run: |
+          # TODO: definir el destino del deployment (pendiente de decidir con Dylan).
+          echo "Imágenes listas para desplegar:"
+          echo "  ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gamestats-analytics:${{ github.sha }}"
+          echo "  ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gamestats-ingestion:${{ github.sha }}"
