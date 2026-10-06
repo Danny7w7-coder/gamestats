@@ -46,7 +46,7 @@ class StatsSuite extends munit.FunSuite:
     assert(Analyzer.analyze(load("football_match_ok.json")).isRight)
 
   test("encode: winner null y sin score/teamStats cuando no existen"):
-    val a = Analyzer.analyze(load("racing_match_ok.json")).fold(fail(_), identity)
+    val a = BaseAnalyzer("racing").analyze(load("racing_match_ok.json"))
     val json = Codecs.encode(a)
     assertEquals(json("matchStats")("winner"), ujson.Null)
     assert(!json("matchStats").obj.contains("score"))
