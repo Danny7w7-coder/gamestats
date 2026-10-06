@@ -1,0 +1,9 @@
+# Logs generados en ejecución (rejected.jsonl, etc.)
+logs/
+
+# Binarios compilados
+/ingestion
+/simulator
+*.exe
+*.test
+*.out
