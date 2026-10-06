@@ -1,0 +1,142 @@
+package validation
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"gamestats/ingestion/internal/model"
+)
+
+// validEvent devuelve un evento válido de racing. Cada caso de la tabla lo
+// modifica para probar una regla.
+func validEvent() model.Event {
+	return model.Event{
+		EventID:     "race-001-e005",
+		Timestamp:   "2026-10-05T14:01:22Z",
+		GameID:      "racing",
+		GameVersion: "1.0",
+		MatchID:     "race-001",
+		PlayerID:    "p1",
+		Type:        "PLAYER_ACTION",
+		Action:      "LAP_COMPLETED",
+		Data:        json.RawMessage(`{"lap":1,"lapTimeMs":82000,"position":1}`),
+	}
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		modify  func(e *model.Event)
+		wantErr string // "" significa que el evento debe ser válido
+	}{
+		// Regla 1: campos obligatorios.
+		{"r1 válido: todos los campos", func(e *model.Event) {}, ""},
+		{"r1 inválido: sin eventId", func(e *model.Event) { e.EventID = "" }, "falta el campo eventId"},
+		{"r1 inválido: sin timestamp", func(e *model.Event) { e.Timestamp = "" }, "falta el campo timestamp"},
+		{"r1 inválido: sin gameId", func(e *model.Event) { e.GameID = "" }, "falta el campo gameId"},
+		{"r1 inválido: sin gameVersion", func(e *model.Event) { e.GameVersion = "" }, "falta el campo gameVersion"},
+		{"r1 inválido: sin matchId", func(e *model.Event) { e.MatchID = "" }, "falta el campo matchId"},
+		{"r1 inválido: sin type", func(e *model.Event) { e.Type = "" }, "falta el campo type"},
+
+		// Regla 2: timestamp RFC 3339.
+		{"r2 válido: con milisegundos", func(e *model.Event) { e.Timestamp = "2026-10-05T15:01:22.500Z" }, ""},
+		{"r2 válido: con zona horaria", func(e *model.Event) { e.Timestamp = "2026-10-05T08:01:22-06:00" }, ""},
+		{"r2 inválido: texto libre", func(e *model.Event) { e.Timestamp = "ayer a las 2" }, "RFC 3339"},
+		{"r2 inválido: sin zona horaria", func(e *model.Event) { e.Timestamp = "2026-10-05T14:01:22" }, "RFC 3339"},
+
+		// Regla 3: gameId en el catálogo.
+		{"r3 válido: football", func(e *model.Event) { e.GameID = "football"; e.Action = "PASS" }, ""},
+		{"r3 inválido: juego desconocido", func(e *model.Event) { e.GameID = "chess" }, "gameId desconocido"},
+
+		// Regla 4: type válido.
+		{"r4 válido: PLAYER_JOINED", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
+		{"r4 inválido: type desconocido", func(e *model.Event) { e.Type = "PLAYER_DANCED" }, "type desconocido"},
+
+		// Regla 5: playerId obligatorio salvo en MATCH_STARTED / MATCH_FINISHED.
+		{"r5 válido: MATCH_STARTED sin playerId", func(e *model.Event) { e.Type = "MATCH_STARTED"; e.Action = ""; e.PlayerID = "" }, ""},
+		{"r5 válido: MATCH_FINISHED sin playerId", func(e *model.Event) { e.Type = "MATCH_FINISHED"; e.Action = ""; e.PlayerID = "" }, ""},
+		{"r5 inválido: PLAYER_ACTION sin playerId", func(e *model.Event) { e.PlayerID = "" }, "falta el campo playerId"},
+		{"r5 inválido: PLAYER_LEFT sin playerId", func(e *model.Event) { e.Type = "PLAYER_LEFT"; e.Action = ""; e.PlayerID = "" }, "falta el campo playerId"},
+
+		// Regla 6: action del catálogo de ESE juego.
+		{"r6 válido: GOAL en football", func(e *model.Event) { e.GameID = "football"; e.Action = "GOAL" }, ""},
+		{"r6 inválido: sin action", func(e *model.Event) { e.Action = "" }, "falta el campo action"},
+		{"r6 inválido: GOAL en racing", func(e *model.Event) { e.Action = "GOAL" }, `la acción "GOAL" no existe en el juego "racing"`},
+		{"r6 inválido: acción inventada", func(e *model.Event) { e.Action = "JUMP" }, "no existe en el juego"},
+
+		// Regla 7: action solo en PLAYER_ACTION.
+		{"r7 válido: PLAYER_JOINED sin action", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
+		{"r7 inválido: MATCH_STARTED con action", func(e *model.Event) { e.Type = "MATCH_STARTED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := validEvent()
+			tt.modify(&e)
+
+			err := Validate(e)
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("se esperaba válido, pero falló: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("se esperaba error con %q, pero fue válido", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, se esperaba que contuviera %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateContractFixtures valida los eventos de los fixtures de Danny
+// (contracts/fixtures/, solo lectura). Cada fixture es un lote: se validan sus
+// "events". Si la carpeta no existe (por ejemplo, fuera del repo), se salta.
+func TestValidateContractFixtures(t *testing.T) {
+	dir := filepath.Join("..", "..", "..", "contracts", "fixtures")
+	if _, err := os.Stat(dir); err != nil {
+		t.Skipf("no se encontró %s: %v", dir, err)
+	}
+
+	tests := []struct {
+		file        string
+		wantInvalid []string // eventId que deben ser rechazados
+	}{
+		{"racing_match_ok.json", nil},
+		{"comeback_case.json", nil},
+		{"football_match_ok.json", nil},
+		{"football_comeback.json", nil},
+		{"invalid_bad_timestamp.json", []string{"y-e02"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(dir, tt.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var batch struct {
+				Events []model.Event `json:"events"`
+			}
+			if err := json.Unmarshal(raw, &batch); err != nil {
+				t.Fatal(err)
+			}
+
+			var invalid []string
+			for _, e := range batch.Events {
+				if err := Validate(e); err != nil {
+					invalid = append(invalid, e.EventID)
+				}
+			}
+			if strings.Join(invalid, ",") != strings.Join(tt.wantInvalid, ",") {
+				t.Fatalf("rechazados = %v, se esperaba %v", invalid, tt.wantInvalid)
+			}
+		})
+	}
+}
