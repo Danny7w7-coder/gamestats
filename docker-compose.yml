@@ -10,6 +10,7 @@ services:
   # Análisis y estadísticas (Scala, de Danny).
   analytics:
     build: ./analytics-scala
+    image: gamestats-analytics
     ports:
       - "8081:8081"
     environment:
@@ -18,7 +19,6 @@ services:
     volumes:
       # Los resultados (un JSON por partida) sobreviven a "docker compose down".
       - analytics-results:/data
-    # Requiere que la imagen de Scala tenga curl (a coordinar con Danny).
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:8081/health"]
       interval: 5s
@@ -48,8 +48,12 @@ services:
       retries: 10
 
   # Simulador de partidas (Go). Solo corre a pedido: perfil "sim".
+  # Usa la misma imagen que "ingestion" (trae los dos binarios) y no la
+  # construye: la construye el servicio ingestion. Como depende de ingestion,
+  # "docker compose run --rm simulator" funciona aunque la imagen no exista
+  # todavía (compose construye ingestion primero). Con "--no-deps" y sin la
+  # imagen, Docker intentaría descargarla de Docker Hub y fallaría.
   simulator:
-    build: ./ingestion-go
     image: gamestats-ingestion
     profiles: ["sim"]
     entrypoint: ["/app/simulator"]
