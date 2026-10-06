@@ -25,7 +25,7 @@ object Analyzer:
 
   /** Juegos soportados. Agregar un juego = agregar su analyzer a esta lista. */
   val registry: Map[String, GameAnalyzer] =
-    List(RacingAnalyzer, BaseAnalyzer("football"))
+    List(RacingAnalyzer, FootballAnalyzer)
       .map(a => a.gameId -> a) // map: cada analyzer queda indexado por su gameId
       .toMap
 
