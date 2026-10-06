@@ -19,7 +19,7 @@ Decisiones:
 - `winner`: racing → `playerId` (`ranking[0]`); football → `teamId`; empate o sin datos → `null`.
 - `score` y `teamStats` solo aparecen en football. `patterns[].playerId` es `null` en patrones de equipo.
 
-Quién valida qué:
+## Quién valida qué
 
 - **Go** valida cada evento al recibirlo y rechaza solo ese evento: campos obligatorios, `timestamp` RFC3339, `type` conocido, `action` solo en `PLAYER_ACTION`, y `action` dentro del catálogo del juego (`ingestion-go/internal/validation/catalog.go`). Go **no** revisa `data`. Por eso, aunque `event.schema.json` acepta cualquier `action`, en la práctica a Scala solo llegan acciones del catálogo.
 - **Scala** rechaza el lote completo (`400`) solo por errores del lote: encabezado incompleto, `events` vacío, un evento sin `eventId`/`timestamp`/`type` válidos o de otra partida/juego, o `gameId` sin analyzer. Si una acción conocida trae `data` mal formada, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual. Una acción desconocida se cuenta en `eventsByAction` y no afecta el resto.
