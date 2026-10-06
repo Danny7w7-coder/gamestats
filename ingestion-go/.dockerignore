@@ -1,0 +1,11 @@
+# Lo que no hace falta enviar a Docker al construir la imagen.
+logs/
+*.exe
+*.test
+*.out
+/ingestion
+/simulator
+.git
+.vscode
+Dockerfile
+.dockerignore
