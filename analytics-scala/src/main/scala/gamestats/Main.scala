@@ -1,6 +1,9 @@
 package gamestats
 
 import gamestats.api.AnalyticsRoutes
+import gamestats.storage.ResultStore
+
+import java.nio.file.Paths
 
 /** Punto de entrada del servicio HTTP. */
 object Main extends cask.Main:
@@ -12,4 +15,16 @@ object Main extends cask.Main:
   override def port: Int =
     sys.env.get("PORT").flatMap(_.toIntOption).getOrElse(8081)
 
-  val allRoutes = Seq(AnalyticsRoutes())
+  private val resultsDir = Paths.get(sys.env.getOrElse("RESULTS_DIR", "./results"))
+
+  // Si la carpeta de resultados no se puede usar, no tiene sentido arrancar.
+  private val store: ResultStore = ResultStore.open(resultsDir) match
+    case Right(ResultStore.Opened(store, skipped)) =>
+      skipped.foreach(s => Console.err.println(s"[results] archivo ignorado: $s"))
+      println(s"[results] ${store.all.size} resultado(s) cargados desde ${resultsDir.toAbsolutePath.normalize}")
+      store
+    case Left(error) =>
+      Console.err.println(s"[results] $error")
+      sys.exit(1)
+
+  val allRoutes = Seq(AnalyticsRoutes(store))

@@ -140,19 +140,80 @@ object Codecs:
     )
     ujson.Obj.from(fields ++ m.score.map(s => "score" -> sortedObj(s)(n => ujson.Num(n))))
 
-  private def encodePattern(p: Pattern): ujson.Value =
+  def encodePattern(p: Pattern): ujson.Value =
     ujson.Obj(
       "rule"        -> p.rule,
       "playerId"    -> p.playerId.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
       "description" -> p.description
     )
 
+  def encodeMetrics(metrics: Map[String, Double]): ujson.Value =
+    sortedObj(metrics)(ujson.Num(_))
+
   private def entity(idKey: String, id: String, metrics: Map[String, Double]): ujson.Value =
-    ujson.Obj(idKey -> id, "metrics" -> sortedObj(metrics)(ujson.Num(_)))
+    ujson.Obj(idKey -> id, "metrics" -> encodeMetrics(metrics))
 
   /** Map -> objeto JSON con las claves ordenadas, para que la salida sea estable. */
   private def sortedObj[A](m: Map[String, A])(f: A => ujson.Value): ujson.Value =
     ujson.Obj.from(m.toList.sortBy(_._1).map((k, v) => k -> f(v)))
+
+  // ---------------------------------------------------------------------------
+  // Lectura de resultados guardados (inverso de `encode`, para ResultStore)
+  // ---------------------------------------------------------------------------
+
+  def decodeAnalysis(json: ujson.Value): Result[MatchAnalysis] =
+    for
+      f           <- asObject(json, "el resultado")
+      matchId     <- nonEmptyStr(f, "matchId")
+      gameId      <- nonEmptyStr(f, "gameId")
+      matchStats  <- get(f, "matchStats").flatMap(decodeMatchStats).left.map(msg => s"matchStats: $msg")
+      teamStats   <- optionalField(f, "teamStats")(v => decodeList(v, "teamStats")(decodeEntity("teamId", TeamStats(_, _))))
+      playerStats <- get(f, "playerStats").flatMap(decodeList(_, "playerStats")(decodeEntity("playerId", PlayerStats(_, _))))
+      patterns    <- get(f, "patterns").flatMap(decodeList(_, "patterns")(decodePattern))
+    yield MatchAnalysis(matchId, gameId, matchStats, teamStats, playerStats, patterns)
+
+  private def decodeMatchStats(json: ujson.Value): Result[MatchStats] =
+    for
+      f          <- asObject(json, "matchStats")
+      duration   <- long(f, "durationSeconds")
+      total      <- int(f, "totalEvents")
+      players    <- int(f, "playerCount")
+      byAction   <- get(f, "eventsByAction").flatMap(asObject(_, "'eventsByAction'")).flatMap(intValues)
+      winner     <- optStr(f, "winner")
+      score      <- optionalField(f, "score")(v => asObject(v, "'score'").flatMap(intValues))
+    yield MatchStats(duration, total, players, byAction, winner, score)
+
+  private def decodeEntity[A](idKey: String, build: (String, Map[String, Double]) => A)(json: ujson.Value): Result[A] =
+    for
+      f       <- asObject(json, s"cada elemento con '$idKey'")
+      id      <- nonEmptyStr(f, idKey)
+      metrics <- get(f, "metrics").flatMap(asObject(_, "'metrics'")).flatMap(doubleValues)
+    yield build(id, metrics)
+
+  private def decodePattern(json: ujson.Value): Result[Pattern] =
+    for
+      f           <- asObject(json, "cada patrón")
+      rule        <- nonEmptyStr(f, "rule")
+      playerId    <- optStr(f, "playerId")
+      description <- str(f, "description")
+    yield Pattern(rule, playerId, description)
+
+  private def decodeList[A](json: ujson.Value, what: String)(decode: ujson.Value => Result[A]): Result[List[A]] =
+    json.arrOpt.toRight(s"'$what' debe ser un arreglo").flatMap(items => sequence(items.toList.map(decode)))
+
+  /** Campo opcional de cualquier tipo: ausente o null -> None. */
+  private def optionalField[A](f: Fields, key: String)(decode: ujson.Value => Result[A]): Result[Option[A]] =
+    f.get(key).filterNot(_.isNull) match
+      case None    => Right(None)
+      case Some(v) => decode(v).map(Some(_))
+
+  private def doubleValues(f: Fields): Result[Map[String, Double]] =
+    sequence(f.toList.map((k, v) => v.numOpt.map(k -> _).toRight(s"'$k' debe ser número"))).map(_.toMap)
+
+  private def intValues(f: Fields): Result[Map[String, Int]] =
+    sequence(f.toList.map((k, v) =>
+      v.numOpt.filter(n => n.isWhole && n.isValidInt).map(n => k -> n.toInt).toRight(s"'$k' debe ser entero")
+    )).map(_.toMap)
 
   // ---------------------------------------------------------------------------
   // Auxiliares de entrada
