@@ -1,7 +1,7 @@
 package gamestats.api
 
 import gamestats.json.Codecs
-import gamestats.model.{MatchAnalysis, PlayerStats}
+import gamestats.model.{MatchAnalysis, MatchBatch, PlayerStats}
 import gamestats.stats.Analyzer
 import gamestats.storage.ResultStore
 
@@ -17,7 +17,13 @@ case class AnalyticsRoutes(store: ResultStore)(using cc: castor.Context, log: ca
   /** Analiza, guarda y responde. Lote inválido -> 400; fallo de disco -> 500. */
   @cask.post("/analyze")
   def analyze(request: cask.Request): cask.Response[ujson.Value] =
-    AnalyticsRoutes.analyzeBody(request.text()) match
+    val result =
+      for
+        batch    <- AnalyticsRoutes.parseBody(request.text())
+        _         = batch.skipped.foreach(s => println(s"[analyze] ${batch.matchId}: evento descartado ($s)"))
+        analysis <- Analyzer.analyze(batch)
+      yield analysis
+    result match
       case Left(error) => AnalyticsRoutes.error(400, error)
       case Right(analysis) =>
         store.save(analysis) match
@@ -47,11 +53,11 @@ object AnalyticsRoutes:
     * validación o juego sin analyzer) vuelve como Left.
     */
   def analyzeBody(body: String): Either[String, MatchAnalysis] =
-    for
-      json     <- Codecs.readJson(body)
-      batch    <- Codecs.parseBatch(json)
-      analysis <- Analyzer.analyze(batch)
-    yield analysis
+    parseBody(body).flatMap(Analyzer.analyze)
+
+  /** Texto del request -> lote validado (con sus eventos descartados en `skipped`). */
+  def parseBody(body: String): Either[String, MatchBatch] =
+    Codecs.readJson(body).flatMap(Codecs.parseBatch)
 
   /** Estadísticas de un jugador en todas sus partidas; None si no jugó ninguna. */
   def playerReport(playerId: String, results: List[MatchAnalysis]): Option[ujson.Value] =

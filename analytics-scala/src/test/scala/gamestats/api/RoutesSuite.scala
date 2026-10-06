@@ -22,6 +22,15 @@ class RoutesSuite extends munit.FunSuite:
     val body = Fixtures.text("racing_match_ok.json").replace("\"racing\"", "\"chess\"")
     assertEquals(AnalyticsRoutes.analyzeBody(body), Left("no hay analyzer para gameId 'chess'"))
 
+  test("una vuelta con data rota se descarta y la carrera se analiza igual"):
+    // Se rompe lapTimeMs de la 3ra vuelta de p1 (80900 -> "rápido").
+    val body = Fixtures.text("racing_match_ok.json").replace("\"lapTimeMs\": 80900", "\"lapTimeMs\": \"rápido\"")
+    val batch = AnalyticsRoutes.parseBody(body).fold(fail(_), identity)
+    assertEquals(batch.skipped, List("r1-e14: LAP_COMPLETED.data: 'lapTimeMs' debe ser número"))
+    val p1 = AnalyticsRoutes.analyzeBody(body).fold(fail(_), identity).playerStats.find(_.playerId == "p1").get
+    assertEquals(p1.metrics("bestLapMs"), 81500.0) // sin la vuelta de 80900
+    assertEquals(p1.metrics("avgLapMs"), 81750.0)
+
   test("analyzeBody rechaza JSON inválido"):
     assert(AnalyticsRoutes.analyzeBody("{no es json").left.exists(_.startsWith("JSON inválido")))
 
