@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "title": "GameStats Event",
+  "description": "Un evento de partida. `action` es un string libre: las acciones conocidas validan su `data`; una acción desconocida se acepta (Scala la guarda como UnknownAction).",
+  "type": "object",
+  "required": ["eventId", "timestamp", "gameId", "gameVersion", "matchId", "type"],
+  "properties": {
+    "eventId":     { "type": "string", "minLength": 1 },
+    "timestamp":   { "type": "string", "format": "date-time", "description": "RFC3339. El orden de los eventos se toma siempre de aquí." },
+    "gameId":      { "enum": ["racing", "football"] },
+    "gameVersion": { "type": "string", "minLength": 1 },
+    "matchId":     { "type": "string", "minLength": 1 },
+    "playerId":    { "type": "string", "minLength": 1 },
+    "type": {
+      "enum": [
+        "MATCH_STARTED", "MATCH_FINISHED",
+        "PLAYER_JOINED", "PLAYER_LEFT",
+        "PLAYER_DISCONNECTED", "PLAYER_RECONNECTED",
+        "PLAYER_ACTION"
+      ]
+    },
+    "action": { "type": "string", "pattern": "^[A-Z][A-Z_]*$" },
+    "data":   { "type": "object" }
+  },
+  "allOf": [
+    {
+      "description": "playerId obligatorio salvo en MATCH_STARTED y MATCH_FINISHED",
+      "if":   { "properties": { "type": { "not": { "enum": ["MATCH_STARTED", "MATCH_FINISHED"] } } } },
+      "then": { "required": ["playerId"] }
+    },
+    {
+      "description": "action obligatorio solo en PLAYER_ACTION",
+      "if":   { "properties": { "type": { "const": "PLAYER_ACTION" } } },
+      "then": { "required": ["action"] },
+      "else": { "not": { "required": ["action"] } }
+    },
+
+    { "if": { "properties": { "gameId": { "const": "racing" },   "type": { "const": "MATCH_STARTED" } }, "required": ["gameId", "type"] },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/racingMatchStarted" } } } },
+    { "if": { "properties": { "gameId": { "const": "racing" },   "type": { "const": "MATCH_FINISHED" } }, "required": ["gameId", "type"] },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/racingMatchFinished" } } } },
+    { "if": { "properties": { "gameId": { "const": "football" }, "type": { "const": "MATCH_STARTED" } }, "required": ["gameId", "type"] },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/footballMatchStarted" } } } },
+    { "if": { "properties": { "gameId": { "const": "football" }, "type": { "const": "PLAYER_JOINED" } }, "required": ["gameId", "type"] },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/footballPlayerJoined" } } } },
+
+    { "if": { "properties": { "action": { "const": "LAP_COMPLETED" } },    "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/lapCompleted" } } } },
+    { "if": { "properties": { "action": { "const": "POSITION_CHANGED" } }, "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/positionChanged" } } } },
+    { "if": { "properties": { "action": { "const": "PENALTY" } },          "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/penalty" } } } },
+    { "if": { "properties": { "action": { "const": "PASS" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/pass" } } } },
+    { "if": { "properties": { "action": { "const": "SHOT" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/shot" } } } },
+    { "if": { "properties": { "action": { "const": "GOAL" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/goal" } } } },
+    { "if": { "properties": { "action": { "const": "FOUL" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/foul" } } } }
+  ],
+  "$defs": {
+    "racingMatchStarted":   { "type": "object", "required": ["track", "laps"], "properties": { "track": { "type": "string" }, "laps": { "type": "integer", "minimum": 1 } } },
+    "racingMatchFinished":  { "type": "object", "required": ["ranking"], "properties": { "ranking": { "type": "array", "items": { "type": "string" }, "minItems": 1 } } },
+    "footballMatchStarted": { "type": "object", "required": ["homeTeam", "awayTeam"], "properties": { "homeTeam": { "type": "string" }, "awayTeam": { "type": "string" } } },
+    "footballPlayerJoined": { "type": "object", "required": ["teamId"], "properties": { "teamId": { "type": "string" } } },
+
+    "lapCompleted":    { "type": "object", "required": ["lap", "lapTimeMs", "position"], "properties": { "lap": { "type": "integer", "minimum": 1 }, "lapTimeMs": { "type": "integer", "minimum": 1 }, "position": { "type": "integer", "minimum": 1 } } },
+    "positionChanged": { "type": "object", "required": ["from", "to", "lap"], "properties": { "from": { "type": "integer", "minimum": 1 }, "to": { "type": "integer", "minimum": 1 }, "lap": { "type": "integer", "minimum": 1 } } },
+    "penalty":         { "type": "object", "required": ["seconds", "reason"], "properties": { "seconds": { "type": "integer", "minimum": 0 }, "reason": { "type": "string" } } },
+
+    "pass": { "type": "object", "required": ["teamId", "targetId", "success", "distance", "minute"], "properties": { "teamId": { "type": "string" }, "targetId": { "type": "string" }, "success": { "type": "boolean" }, "distance": { "type": "number", "minimum": 0 }, "minute": { "$ref": "#/$defs/minute" } } },
+    "shot": { "type": "object", "required": ["teamId", "onTarget", "minute"], "properties": { "teamId": { "type": "string" }, "onTarget": { "type": "boolean" }, "minute": { "$ref": "#/$defs/minute" } } },
+    "goal": { "type": "object", "required": ["teamId", "minute"], "properties": { "teamId": { "type": "string" }, "assistId": { "type": "string" }, "minute": { "$ref": "#/$defs/minute" } } },
+    "foul": { "type": "object", "required": ["teamId", "card", "minute"], "properties": { "teamId": { "type": "string" }, "card": { "enum": ["none", "yellow", "red"] }, "minute": { "$ref": "#/$defs/minute" }, "targetId": { "type": "string" } } },
+
+    "minute": { "type": "integer", "minimum": 0, "description": "Informativo; no se usa para ordenar." }
+  }
+}
