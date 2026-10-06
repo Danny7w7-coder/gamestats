@@ -59,7 +59,7 @@ Se leen al arrancar (`internal/config/config.go`). Si una variable viene vacía 
 | `PORT` | `8080` | Puerto HTTP del servidor |
 | `SCALA_URL` | `http://localhost:8081` | Dirección del servicio de Scala (en Docker: `http://analytics:8081`) |
 | `WORKERS` | `4` | Cuántas goroutines envían lotes a Scala en paralelo |
-| `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se marca como `abandonada` *(en desarrollo)* |
+| `IDLE_TIMEOUT` | `2m` | Tiempo sin eventos tras el cual una partida se marca como `abandonada` (formato de Go: `30s`, `2m`, `1h`) |
 
 Ejemplo en PowerShell:
 
@@ -116,7 +116,8 @@ Estados de una partida:
 
 ```
 en_curso ──MATCH_FINISHED──▶ terminada ──Scala responde 2xx──▶ enviada
-                                  └──────fallan los reintentos──▶ error_envio
+   │                              └──────fallan los reintentos──▶ error_envio
+   └──IDLE_TIMEOUT sin eventos──▶ abandonada (no se envía a Scala)
 ```
 
 Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED` (entran) y con `PLAYER_LEFT` y `PLAYER_DISCONNECTED` (salen).
@@ -139,6 +140,7 @@ Hay dos motivos de rechazo más, que no vienen de `Validate`:
 
 - **Formato:** el evento no se puede decodificar, por ejemplo `"timestamp": 5`. Se rechaza ese evento y los demás siguen.
 - **Partida ya finalizada:** llega un evento de una partida que ya recibió `MATCH_FINISHED`. Su lote ya se armó, así que el evento se rechaza (ver [Concurrencia](#concurrencia)).
+- **Partida abandonada por inactividad:** llega un evento de una partida que se abandonó por `IDLE_TIMEOUT`.
 
 Go **no** revisa el contenido de `data`. Esa división de responsabilidades está acordada con Scala en [`contracts/README.md` → "Quién valida qué"](../contracts/README.md#quién-valida-qué):
 
@@ -171,7 +173,7 @@ POST /events ──▶ [in] ──▶ router ──┬──▶ goroutine partid
 | Pieza | Qué hace |
 |---|---|
 | **Handler** (`api/handler.go`) | Valida el evento y llama a `Submit`, que lo pone en el canal `in` y espera la respuesta del router. |
-| **Router** (una goroutine, `dispatcher.go`) | Lee de `in`. Si la partida ya terminó, rechaza el evento. Si no, lo registra en el store y lo pasa al canal de su partida, creando la goroutine de la partida si es la primera vez que la ve. |
+| **Router** (una goroutine, `dispatcher.go`) | Lee de `in`. Si la partida ya terminó o se abandonó, rechaza el evento. Si no, lo registra en el store y lo pasa al canal de su partida, creando la goroutine de la partida si es la primera vez que la ve. Además revisa periódicamente las partidas inactivas (ver [Abandono por inactividad](#abandono-por-inactividad)). |
 | **Goroutine por partida** (`collect`) | Acumula los eventos de **una** partida. Cuando su canal se cierra después de `MATCH_FINISHED`, ordena los eventos con `sort.SliceStable` por `timestamp`, arma el `Batch` y lo envía a `out`. Después termina. |
 | **Senders** (`WORKERS` goroutines, `sender.go`) | Leen de `out` y envían cada lote a Scala. Todos leen del mismo canal, y Go garantiza que cada lote lo recibe un solo sender. |
 
@@ -190,8 +192,8 @@ Todo channel tiene un dueño que lo cierra, y es siempre quien envía en él. As
 
 | Channel | Quién lo cierra | Cuándo |
 |---|---|---|
-| `in` | `Dispatcher.Close()` | Al apagar el pipeline. Hoy lo usan los tests; el apagado ordenado con Ctrl+C está *en desarrollo* |
-| Canal de cada partida | El router, que es el único que les envía | Al reenviar `MATCH_FINISHED`, o al apagar |
+| `in` | `Dispatcher.Close()`, llamado por `main` | Al apagar, **después** de que el servidor HTTP dejó de atender peticiones (ver [Apagado ordenado](#apagado-ordenado)) |
+| Canal de cada partida | El router, que es el único que les envía | Al reenviar `MATCH_FINISHED`, al abandonar la partida por inactividad o al apagar |
 | `out` | El router | Después de que **todas** las goroutines de partida terminaron (las espera con un `sync.WaitGroup`), porque ellas son las que envían a `out` |
 | `reply` de cada `Submit` | Nadie: tiene buffer de 1 y el recolector de basura lo libera | — |
 
@@ -207,10 +209,41 @@ Si llega un evento de una partida que ya recibió `MATCH_FINISHED`, el router lo
 
 `Submit` espera la respuesta del router porque solo él conoce el orden real de llegada. Así `POST /events` puede decir con exactitud qué eventos se rechazaron.
 
+### Abandono por inactividad
+
+Si una partida pasa `IDLE_TIMEOUT` (por defecto 2 minutos) sin recibir eventos, se marca como `abandonada` y **no se envía a Scala**, porque está incompleta. Se mide con la hora real del servidor al recibir cada evento, no con el `timestamp` del evento.
+
+El router lo resuelve sin goroutines ni locks extra. Guarda la hora del último evento de cada partida y usa un `select` que espera dos cosas a la vez: un evento nuevo o el tic de un `time.Ticker`. En cada tic recorre sus partidas abiertas y, a las inactivas, les cierra el canal y las marca como abandonadas. Como el canal se cerró sin `MATCH_FINISHED`, la goroutine de la partida termina sin armar lote. El router sigue siendo el único dueño del mapa y de los canales.
+
+El tic ocurre cada medio `IDLE_TIMEOUT`, así que una partida se abandona entre 1 y 1,5 veces `IDLE_TIMEOUT` después de su último evento. Un evento que llegue después se rechaza:
+
+```json
+{"received":1,"accepted":0,"rejected":[{"eventId":"y-e3","reason":"partida abandonada por inactividad"}]}
+```
+
+### Apagado ordenado
+
+Con Ctrl+C, o con `docker stop` (que manda la señal SIGTERM), el servidor no se corta de golpe. `main.go` usa `signal.NotifyContext` para enterarse de la señal y apaga en este orden:
+
+1. **`srv.Shutdown`**: deja de aceptar peticiones y espera a que terminen las que están en curso. No tiene límite de tiempo a propósito: si el pipeline se cerrara mientras un handler todavía puede llamar a `Submit`, ese handler enviaría a un channel cerrado (`panic`).
+2. **`dispatcher.Close()`**: cierra `in`. El router cierra las partidas abiertas (las que no terminaron no se envían), espera a sus goroutines y cierra `out`.
+3. **`senders.Wait()`**: un `sync.WaitGroup` espera a que los senders envíen a Scala los lotes que quedaban pendientes y terminen.
+
+En el log se ve así:
+
+```
+apagando: no se aceptan más eventos
+apagado: 1 partidas sin terminar no se envían a Scala
+apagado completo
+```
+
+Un segundo Ctrl+C cierra el programa de inmediato. Si Scala está caído al apagar, los reintentos pueden alargar el apagado: `docker stop` espera 10 s y después termina el proceso a la fuerza.
+
 ### Cómo se comprueba
 
 - `go test -race ./...` corre todos los tests con el detector de data races. También corre en el CI (`.github/workflows/ci-go.yml`).
-- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, los empates de `timestamp`, el cierre con una partida sin terminar y muchos `Submit` en paralelo (`TestConcurrentSubmit`).
+- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`) y que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`).
+- `pipeline/sender_test.go` comprueba que, al cerrar el pipeline, los lotes pendientes se envían igual a un Scala lento antes de que los senders terminen (`TestCloseSendsPendingBatches`).
 - El simulador manda cada partida desde su propia goroutine, así que los eventos llegan intercalados al servidor.
 
 ## Envío a Scala

@@ -184,7 +184,7 @@ En Scala sería algo como `events.flatMap(_.playerId).distinct.sorted`. Lo mismo
 
 #### 5. Todo vive en memoria
 
-El estado de las partidas en curso está solo en la memoria del proceso. Si el servidor se reinicia, las partidas que no habían terminado se pierden. Para este proyecto es aceptable, pero un sistema real necesitaría guardarlas en disco o en una cola persistente.
+El estado de las partidas en curso está solo en la memoria del proceso. Si el servidor se reinicia, las partidas que no habían terminado se pierden. Para este proyecto es aceptable, pero un sistema real necesitaría guardarlas en disco o en una cola persistente. El apagado ordenado (Ctrl+C o `docker stop`) cubre el caso normal: antes de cerrar, el servidor termina de enviar las partidas que ya habían terminado. Lo que no puede evitar es perder lo que estaba en memoria si el proceso muere de golpe.
 
 ### ¿Por qué HTTP entre Go y Scala?
 

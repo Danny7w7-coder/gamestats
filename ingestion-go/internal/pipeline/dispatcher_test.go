@@ -53,7 +53,7 @@ func eventIDs(events []model.Event) []string {
 // Dos partidas mezcladas, con eventos fuera de orden: deben salir dos lotes
 // separados y cada uno ordenado por timestamp.
 func TestTwoInterleavedMatches(t *testing.T) {
-	d := New(state.NewMatchStore())
+	d := New(state.NewMatchStore(), time.Hour)
 
 	arrivals := []model.Event{
 		ev("a1", "A", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""),
@@ -103,7 +103,7 @@ func TestTwoInterleavedMatches(t *testing.T) {
 // ni al store, y no crea una partida nueva.
 func TestLateEventIsRejected(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store)
+	d := New(store, time.Hour)
 
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
@@ -134,7 +134,7 @@ func TestLateEventIsRejected(t *testing.T) {
 
 // Con el mismo timestamp, se respeta el orden de llegada (sort.SliceStable).
 func TestEqualTimestampsKeepArrivalOrder(t *testing.T) {
-	d := New(state.NewMatchStore())
+	d := New(state.NewMatchStore(), time.Hour)
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("x", "M", "2026-10-05T14:02:20Z", "PLAYER_JOINED", "p3"))
 	d.Submit(ev("y", "M", "2026-10-05T14:02:20Z", "PLAYER_JOINED", "p2"))
@@ -149,7 +149,7 @@ func TestEqualTimestampsKeepArrivalOrder(t *testing.T) {
 
 // Sin MATCH_STARTED, startedAt es el timestamp del primer evento.
 func TestStartedAtWithoutMatchStarted(t *testing.T) {
-	d := New(state.NewMatchStore())
+	d := New(state.NewMatchStore(), time.Hour)
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:05Z", "PLAYER_JOINED", "p1"))
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:03Z", "PLAYER_JOINED", "p2"))
 	d.Submit(ev("e3", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
@@ -163,7 +163,7 @@ func TestStartedAtWithoutMatchStarted(t *testing.T) {
 // Al cerrar, una partida sin MATCH_FINISHED no produce lote, su goroutine
 // termina y Out() se cierra (collectBatches falla si algo queda colgado).
 func TestCloseWithUnfinishedMatch(t *testing.T) {
-	d := New(state.NewMatchStore())
+	d := New(state.NewMatchStore(), time.Hour)
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
 
@@ -176,7 +176,7 @@ func TestCloseWithUnfinishedMatch(t *testing.T) {
 // Con -race, este test detecta accesos sin sincronizar.
 func TestConcurrentSubmit(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store)
+	d := New(store, time.Hour)
 	const matches, players = 20, 10
 
 	var wg sync.WaitGroup
@@ -216,5 +216,63 @@ func TestConcurrentSubmit(t *testing.T) {
 		if len(b.Events) != players+2 || len(b.Players) != players {
 			t.Fatalf("lote %s: %d eventos, %d jugadores", b.MatchID, len(b.Events), len(b.Players))
 		}
+	}
+}
+
+// waitStatus espera (hasta 2 s) a que la partida tenga el estado want.
+func waitStatus(t *testing.T, store *state.MatchStore, matchID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if status, _ := store.Status(matchID); status == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	status, _ := store.Status(matchID)
+	t.Fatalf("estado de %s = %q, se esperaba %q", matchID, status, want)
+}
+
+// Una partida sin eventos durante IDLE_TIMEOUT queda abandonada: no produce
+// lote, su goroutine termina y un evento posterior se rechaza.
+func TestIdleMatchIsAbandoned(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, 50*time.Millisecond)
+
+	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
+
+	waitStatus(t, store, "M", state.StatusAbandoned)
+
+	err := d.Submit(ev("e3", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+	if !errors.Is(err, ErrMatchAbandoned) {
+		t.Fatalf("Submit tras abandono = %v, se esperaba ErrMatchAbandoned", err)
+	}
+	if batches := collectBatches(t, d); len(batches) != 0 {
+		t.Fatalf("lotes = %d, se esperaban 0 (una partida abandonada no se envía)", len(batches))
+	}
+}
+
+// Una partida que recibe eventos seguido no se abandona, aunque en total
+// dure más que IDLE_TIMEOUT: lo que cuenta es el tiempo SIN eventos.
+func TestActiveMatchIsNotAbandoned(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, 200*time.Millisecond)
+
+	d.Submit(ev("e0", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	for i := 1; i <= 15; i++ { // 15 × 20 ms = 300 ms en total, más que el timeout
+		time.Sleep(20 * time.Millisecond)
+		ts := fmt.Sprintf("2026-10-05T14:00:%02dZ", i)
+		if err := d.Submit(ev(fmt.Sprintf("e%d", i), "M", ts, "PLAYER_JOINED", fmt.Sprintf("p%d", i))); err != nil {
+			t.Fatalf("evento %d rechazado: %v", i, err)
+		}
+	}
+	d.Submit(ev("end", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+
+	if status, _ := store.Status("M"); status != state.StatusFinished {
+		t.Fatalf("estado = %q, se esperaba terminada", status)
+	}
+	if batches := collectBatches(t, d); len(batches) != 1 {
+		t.Fatalf("lotes = %d, se esperaba 1", len(batches))
 	}
 }
