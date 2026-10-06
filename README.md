@@ -2,12 +2,12 @@
 
 **Proyecto 1 — Lenguajes de Programación**
 Instituto Tecnológico de Costa Rica, Sede San Carlos
-Profesor: Oscar Víquez Acuña
+Profesor: Oscar Viquez Acuña
 
 | Integrante | Módulo |
 |---|---|
-| Danny | Análisis de partidas (Scala) |
-| Dylan | Ingestión de eventos (Go) |
+| Danny Gonzalez Molina | Análisis de partidas (Scala) |
+| Dylan Mendez Zamora | Ingestión de eventos (Go) |
 
 ---
 
