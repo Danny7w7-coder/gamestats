@@ -1,0 +1,10 @@
+{
+  "gameId": "racing",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-05T14:00:00Z",
+  "finishedAt": "2026-10-05T14:04:10Z",
+  "players": ["p1"],
+  "events": [
+    { "eventId": "x-e01", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-999", "type": "MATCH_STARTED", "data": { "track": "monza", "laps": 1 } }
+  ]
+}

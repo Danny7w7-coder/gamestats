@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "results.schema.json",
+  "title": "GameStats MatchAnalysis (salida de Scala)",
+  "description": "Respuesta 200 de POST /analyze y cada elemento de GET /results. score y teamStats solo aparecen en football.",
+  "type": "object",
+  "required": ["matchId", "gameId", "matchStats", "playerStats", "patterns"],
+  "properties": {
+    "matchId": { "type": "string" },
+    "gameId":  { "type": "string" },
+    "matchStats": {
+      "type": "object",
+      "required": ["durationSeconds", "totalEvents", "playerCount", "eventsByAction", "winner"],
+      "properties": {
+        "durationSeconds": { "type": "integer", "minimum": 0 },
+        "totalEvents":     { "type": "integer", "minimum": 0 },
+        "playerCount":     { "type": "integer", "minimum": 0 },
+        "eventsByAction":  { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "winner": {
+          "type": ["string", "null"],
+          "description": "racing: playerId (ranking.head). football: teamId. Empate o sin datos: null."
+        },
+        "score": {
+          "type": "object",
+          "description": "Solo football. Goles por teamId; un equipo sin goles aparece con 0.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "teamStats": {
+      "type": "array",
+      "description": "Solo football.",
+      "items": { "$ref": "#/$defs/entityMetrics", "required": ["teamId", "metrics"], "properties": { "teamId": { "type": "string" } } }
+    },
+    "playerStats": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entityMetrics", "required": ["playerId", "metrics"], "properties": { "playerId": { "type": "string" } } }
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule", "playerId", "description"],
+        "properties": {
+          "rule":        { "type": "string", "examples": ["COMEBACK", "HAT_TRICK"] },
+          "playerId":    { "type": ["string", "null"], "description": "null en patrones de equipo (COMEBACK de football)." },
+          "description": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "entityMetrics": {
+      "type": "object",
+      "properties": {
+        "metrics": {
+          "type": "object",
+          "description": "Métricas numéricas por nombre. racing: bestLapMs, avgLapMs, consistency, penaltySeconds, effectiveTimeMs. football (jugador): goals, assists, passAccuracy, shots, shotEffectiveness. football (equipo): goals, fouls.",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    }
+  }
+}
