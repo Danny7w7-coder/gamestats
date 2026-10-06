@@ -19,20 +19,26 @@ func main() {
 	football := flag.Int("football", 4, "cuántas partidas aleatorias de football generar (además de las guionizadas)")
 	seed := flag.Int64("seed", 42, "semilla: la misma semilla genera exactamente las mismas partidas")
 	target := flag.String("target", "http://localhost:8080", "dirección del servidor de ingestión")
+	corrupt := flag.Int("corrupt", 3, "porcentaje (0 a 100) de eventos a los que se agrega una copia dañada a propósito")
 	flag.Parse()
 
 	if *racing < 0 || *football < 0 {
 		fmt.Fprintln(os.Stderr, "-racing y -football no pueden ser negativos")
 		os.Exit(2)
 	}
+	if *corrupt < 0 || *corrupt > 100 {
+		fmt.Fprintln(os.Stderr, "-corrupt debe estar entre 0 y 100")
+		os.Exit(2)
+	}
 
 	matches := simulator.Generate(*seed, *racing, *football)
+	damaged := simulator.Corrupt(matches, *seed, *corrupt)
 	total := 0
 	for _, m := range matches {
 		total += len(m.Events)
 	}
-	fmt.Printf("seed %d: %d partidas generadas (%d eventos). Enviando a %s...\n",
-		*seed, len(matches), total, *target)
+	fmt.Printf("seed %d: %d partidas generadas (%d eventos, %d dañados a propósito). Enviando a %s...\n",
+		*seed, len(matches), total, damaged, *target)
 	fmt.Println("Escenarios guionizados:")
 	for _, m := range matches {
 		if m.Script != "" {
