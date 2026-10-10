@@ -21,10 +21,13 @@ class RulesSuite extends munit.FunSuite:
 
   // --- Fixtures: los de remontada dan el patrón, los *_ok no dan ninguno -------
 
-  test("comeback_case: p3 va 3° -> 2° -> 1° y gana => COMEBACK"):
+  test("comeback_case: p3 va 3° -> 2° -> 1° y gana => COMEBACK (y además sin choques: CLEAN_RACE)"):
     assertEquals(
       patternsOf(raceComeback),
-      List(Pattern("COMEBACK", Some("p3"), "p3 remontó desde el 3° lugar y ganó la carrera"))
+      List(
+        Pattern("COMEBACK", Some("p3"), "p3 remontó desde el 3° lugar y ganó la carrera"),
+        Pattern("CLEAN_RACE", Some("p3"), "p3 ganó sin choques ni penalizaciones")
+      )
     )
 
   test("football_comeback: goles B, A, A => COMEBACK del equipo A, sin playerId"):
@@ -33,8 +36,9 @@ class RulesSuite extends munit.FunSuite:
       List(Pattern("COMEBACK", None, "El equipo A remontó y ganó 2-1"))
     )
 
-  test("los fixtures *_ok no devuelven patrones"):
-    assertEquals(patternsOf(raceOk), Nil)
+  test("los fixtures *_ok no tienen remontada; en racing_match_ok p1 gana limpio"):
+    // p3 tiene la penalización, no p1: la carrera del ganador es limpia.
+    assertEquals(patternsOf(raceOk), List(Pattern("CLEAN_RACE", Some("p1"), "p1 ganó sin choques ni penalizaciones")))
     assertEquals(patternsOf(footOk), Nil)
 
   // --- Racing -------------------------------------------------------------------
@@ -91,5 +95,5 @@ class RulesSuite extends munit.FunSuite:
   // --- Integración ------------------------------------------------------------------
 
   test("cada juego corre solo sus reglas"):
-    assertEquals(gamestats.stats.RacingAnalyzer.rules.map(_.name), List("COMEBACK"))
+    assertEquals(gamestats.stats.RacingAnalyzer.rules.map(_.name), List("COMEBACK", "CLEAN_RACE", "ITEM_MASTER"))
     assertEquals(gamestats.stats.FootballAnalyzer.rules.map(_.name), List("COMEBACK", "HAT_TRICK"))

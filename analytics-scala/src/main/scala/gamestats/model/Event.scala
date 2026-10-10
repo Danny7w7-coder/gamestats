@@ -15,6 +15,17 @@ enum EventType:
 enum Card:
   case None, Yellow, Red
 
+/** Objetos de racing. `key` es el nombre con el que viajan en el JSON. */
+enum Item(val key: String):
+  case Boost  extends Item("boost")
+  case Shield extends Item("shield")
+  case Oil    extends Item("oil")
+
+enum DnfReason(val key: String):
+  case Crash        extends DnfReason("crash")
+  case Mechanical   extends DnfReason("mechanical")
+  case Disqualified extends DnfReason("disqualified")
+
 /** Acción de juego dentro de un PLAYER_ACTION. `sealed` hace que el compilador
   * avise si un `match` olvida algún caso.
   */
@@ -25,6 +36,15 @@ sealed trait GameAction:
     case _: LapCompleted     => "LAP_COMPLETED"
     case _: PositionChanged  => "POSITION_CHANGED"
     case _: Penalty          => "PENALTY"
+    case _: Overtake         => "OVERTAKE"
+    case _: Lapped           => "LAPPED"
+    case _: ItemPickup       => "ITEM_PICKUP"
+    case _: ItemUsed         => "ITEM_USED"
+    case _: Drift            => "DRIFT"
+    case _: Collision        => "COLLISION"
+    case _: Spin             => "SPIN"
+    case _: Respawn          => "RESPAWN"
+    case _: Dnf              => "DNF"
     case _: Pass             => "PASS"
     case _: Shot             => "SHOT"
     case _: Goal             => "GOAL"
@@ -35,6 +55,16 @@ sealed trait GameAction:
 case class LapCompleted(lap: Int, lapTimeMs: Long, position: Int) extends GameAction
 case class PositionChanged(from: Int, to: Int, lap: Int)            extends GameAction
 case class Penalty(seconds: Int, reason: String)                    extends GameAction
+case class Overtake(lap: Int, overtakenId: String)                  extends GameAction
+case class Lapped(lap: Int, lappedId: String)                       extends GameAction
+case class ItemPickup(lap: Int, item: Item)                         extends GameAction
+/** `durationMs` solo lo trae el boost (nitro). */
+case class ItemUsed(lap: Int, item: Item, durationMs: Option[Long]) extends GameAction
+case class Drift(lap: Int, corner: Int, durationMs: Long)           extends GameAction
+case class Collision(lap: Int, otherId: String, damage: Int)        extends GameAction
+case class Spin(lap: Int, corner: Int)                              extends GameAction
+case class Respawn(lap: Int, position: Int)                         extends GameAction
+case class Dnf(lap: Int, reason: DnfReason)                         extends GameAction
 
 // Football
 case class Pass(teamId: String, targetId: String, success: Boolean, distance: Double, minute: Int) extends GameAction

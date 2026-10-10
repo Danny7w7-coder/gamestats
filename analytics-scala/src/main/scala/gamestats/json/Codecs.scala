@@ -90,6 +90,7 @@ object Codecs:
 
   /** Nombre de acción + `data` -> GameAction. Para agregar un juego nuevo,
     * se agregan sus casos aquí; cualquier otro nombre queda como UnknownAction.
+    * Además de los tipos se revisan los rangos y valores de event.schema.json.
     */
   def parseAction(name: String, data: ujson.Value): Result[GameAction] =
     val f   = data.objOpt.map(_.toMap).getOrElse(Map.empty[String, ujson.Value])
@@ -97,14 +98,43 @@ object Codecs:
     name match
       // Racing
       case "LAP_COMPLETED" =>
-        ctx(for lap <- int(f, "lap"); t <- long(f, "lapTimeMs"); pos <- int(f, "position")
+        ctx(for lap <- intMin(f, "lap", 1); t <- longMin(f, "lapTimeMs", 1); pos <- intMin(f, "position", 1)
             yield LapCompleted(lap, t, pos))
       case "POSITION_CHANGED" =>
-        ctx(for from <- int(f, "from"); to <- int(f, "to"); lap <- int(f, "lap")
+        ctx(for from <- intMin(f, "from", 1); to <- intMin(f, "to", 1); lap <- intMin(f, "lap", 1)
             yield PositionChanged(from, to, lap))
       case "PENALTY" =>
-        ctx(for s <- int(f, "seconds"); reason <- str(f, "reason")
+        ctx(for s <- intMin(f, "seconds", 0); reason <- str(f, "reason")
             yield Penalty(s, reason))
+      case "OVERTAKE" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "overtakenId")
+            yield Overtake(lap, other))
+      case "LAPPED" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "lappedId")
+            yield Lapped(lap, other))
+      case "ITEM_PICKUP" =>
+        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
+            yield ItemPickup(lap, item))
+      case "ITEM_USED" =>
+        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
+                ms  <- optionalField(f, "durationMs")(_ => longMin(f, "durationMs", 1))
+                _   <- check(item != Item.Boost || ms.isDefined, "el boost necesita 'durationMs'")
+            yield ItemUsed(lap, item, ms))
+      case "DRIFT" =>
+        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1); ms <- longMin(f, "durationMs", 1)
+            yield Drift(lap, corner, ms))
+      case "COLLISION" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "otherId"); dmg <- intIn(f, "damage", 0, 100)
+            yield Collision(lap, other, dmg))
+      case "SPIN" =>
+        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1)
+            yield Spin(lap, corner))
+      case "RESPAWN" =>
+        ctx(for lap <- intMin(f, "lap", 1); pos <- intMin(f, "position", 1)
+            yield Respawn(lap, pos))
+      case "DNF" =>
+        ctx(for lap <- intMin(f, "lap", 1); reason <- oneOf(f, "reason", DnfReason.values.map(r => r.key -> r).toMap)
+            yield Dnf(lap, reason))
       // Football
       case "PASS" =>
         ctx(for team <- str(f, "teamId"); target <- str(f, "targetId"); ok <- bool(f, "success")
@@ -307,6 +337,23 @@ object Codecs:
 
   private def int(f: Fields, key: String): Result[Int] =
     long(f, key).filterOrElse(_.isValidInt, s"'$key' fuera de rango").map(_.toInt)
+
+  // Rangos del schema (minimum / maximum). filterOrElse convierte un valor fuera
+  // de rango en Left sin cambiar el tipo del resultado.
+  private def intMin(f: Fields, key: String, min: Int): Result[Int] =
+    int(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
+
+  private def intIn(f: Fields, key: String, min: Int, max: Int): Result[Int] =
+    int(f, key).filterOrElse(n => n >= min && n <= max, s"'$key' debe estar entre $min y $max")
+
+  private def longMin(f: Fields, key: String, min: Long): Result[Long] =
+    long(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
+
+  /** Valor dentro de una lista cerrada (los `enum` del schema). */
+  private def oneOf[A](f: Fields, key: String, options: Map[String, A]): Result[A] =
+    str(f, key).flatMap(s =>
+      options.get(s).toRight(s"'$key' debe ser ${options.keys.toList.sorted.mkString("|")}, llegó '$s'")
+    )
 
   private def array(f: Fields, key: String): Result[List[ujson.Value]] =
     get(f, key).flatMap(_.arrOpt.map(_.toList).toRight(s"'$key' debe ser un arreglo"))

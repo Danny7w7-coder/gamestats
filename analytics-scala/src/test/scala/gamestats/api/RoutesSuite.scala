@@ -47,7 +47,10 @@ class RoutesSuite extends munit.FunSuite:
 
   test("playerReport incluye los patrones personales del jugador"):
     val r = AnalyticsRoutes.playerReport("p3", all).getOrElse(fail("p3 debería existir"))
-    assertEquals(r("patterns").arr.map(p => (p("matchId").str, p("rule").str)).toList, List("race-002" -> "COMEBACK"))
+    assertEquals(
+      r("patterns").arr.map(p => (p("matchId").str, p("rule").str)).toList,
+      List("race-002" -> "COMEBACK", "race-002" -> "CLEAN_RACE")
+    )
 
   test("playerReport de un jugador desconocido es None (404)"):
     assertEquals(AnalyticsRoutes.playerReport("nadie", all), None)
