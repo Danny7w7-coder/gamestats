@@ -1,0 +1,40 @@
+{
+  "matchId": "foot-997",
+  "gameId": "football",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-08T11:00:00Z",
+  "finishedAt": "2026-10-08T12:30:00Z",
+  "players": ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"],
+  "events": [
+    { "eventId": "fi-e01", "timestamp": "2026-10-08T11:00:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "type": "MATCH_STARTED", "data": { "homeTeam": "A", "awayTeam": "B" } },
+    { "eventId": "fi-e02", "timestamp": "2026-10-08T11:00:01Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p1", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e03", "timestamp": "2026-10-08T11:00:02Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p2", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e04", "timestamp": "2026-10-08T11:00:03Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p3", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e05", "timestamp": "2026-10-08T11:00:04Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p4", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e06", "timestamp": "2026-10-08T11:00:05Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p5", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e07", "timestamp": "2026-10-08T11:00:06Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p6", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "bad-ctx-seventh-player-joined", "timestamp": "2026-10-08T11:00:07Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p7", "type": "PLAYER_JOINED", "data": { "teamId": "A" } },
+    { "eventId": "fi-e08", "timestamp": "2026-10-08T11:00:08Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p8", "type": "PLAYER_JOINED", "data": { "teamId": "B" } },
+    { "eventId": "fi-e09", "timestamp": "2026-10-08T11:00:09Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p9", "type": "PLAYER_JOINED", "data": { "teamId": "B" } },
+
+    { "eventId": "fi-e10", "timestamp": "2026-10-08T11:05:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "PASS", "data": { "teamId": "A", "targetId": "p2", "success": true, "distance": 15.5, "minute": 5 } },
+    { "eventId": "fi-e11", "timestamp": "2026-10-08T11:06:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "SHOT", "data": { "teamId": "A", "onTarget": true, "minute": 6 } },
+    { "eventId": "bad-ctx-assist-self", "timestamp": "2026-10-08T11:06:01Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "GOAL", "data": { "teamId": "A", "assistId": "p2", "minute": 6 } },
+    { "eventId": "fi-e12", "timestamp": "2026-10-08T11:07:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p3", "type": "PLAYER_ACTION", "action": "SHOT", "data": { "teamId": "A", "onTarget": true, "minute": 7 } },
+    { "eventId": "fi-e13", "timestamp": "2026-10-08T11:07:01Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p3", "type": "PLAYER_ACTION", "action": "GOAL", "data": { "teamId": "A", "assistId": "p2", "minute": 7 } },
+    { "eventId": "bad-ctx-unknown-player", "timestamp": "2026-10-08T11:08:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p8", "type": "PLAYER_ACTION", "action": "PASS", "data": { "teamId": "B", "targetId": "p99", "success": true, "distance": 10.5, "minute": 8 } },
+    { "eventId": "bad-ctx-tackle-self", "timestamp": "2026-10-08T11:09:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p8", "type": "PLAYER_ACTION", "action": "TACKLE", "data": { "teamId": "B", "targetId": "p8", "success": true, "minute": 9 } },
+    { "eventId": "bad-ctx-seventh-player-action", "timestamp": "2026-10-08T11:10:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p7", "type": "PLAYER_ACTION", "action": "PASS", "data": { "teamId": "A", "targetId": "p1", "success": true, "distance": 9.5, "minute": 10 } },
+
+    { "eventId": "bad-data-card-color", "timestamp": "2026-10-08T11:11:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p9", "type": "PLAYER_ACTION", "action": "FOUL", "data": { "teamId": "B", "card": "blue", "minute": 11, "targetId": "p1" } },
+    { "eventId": "bad-data-minute-range", "timestamp": "2026-10-08T11:12:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "CORNER", "data": { "teamId": "A", "minute": 200 } },
+    { "eventId": "bad-data-missing-field", "timestamp": "2026-10-08T11:13:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "POWER_SHOT", "data": { "teamId": "A", "minute": 13 } },
+    { "eventId": "bad-data-wrong-type", "timestamp": "2026-10-08T11:14:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p4", "type": "PLAYER_ACTION", "action": "DRIBBLE", "data": { "teamId": "A", "success": "yes", "minute": 14 } },
+    { "eventId": "bad-data-save-without-team", "timestamp": "2026-10-08T11:15:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p5", "type": "PLAYER_ACTION", "action": "SAVE", "data": { "minute": 15 } },
+
+    { "eventId": "fi-e14", "timestamp": "2026-10-08T11:30:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p9", "type": "PLAYER_ACTION", "action": "FOUL", "data": { "teamId": "B", "card": "red", "minute": 30, "targetId": "p1" } },
+    { "eventId": "bad-ctx-after-red-card", "timestamp": "2026-10-08T11:31:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "playerId": "p9", "type": "PLAYER_ACTION", "action": "SHOT", "data": { "teamId": "B", "onTarget": true, "minute": 31 } },
+
+    { "eventId": "fi-e15", "timestamp": "2026-10-08T12:30:00Z", "gameId": "football", "gameVersion": "1.0", "matchId": "foot-997", "type": "MATCH_FINISHED", "data": {} }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "matchId": "fight-001",
+  "gameId": "fighting",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-06T16:00:00Z",
+  "finishedAt": "2026-10-06T16:00:59Z",
+  "players": ["p1", "p2"],
+  "events": [
+    { "eventId": "x1-e01", "timestamp": "2026-10-06T16:00:00Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "type": "MATCH_STARTED", "data": { "stage": "the_pit", "rounds": 3 } },
+    { "eventId": "x1-e02", "timestamp": "2026-10-06T16:00:01Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_JOINED", "data": { "character": "scorpion" } },
+    { "eventId": "x1-e03", "timestamp": "2026-10-06T16:00:02Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_JOINED", "data": { "character": "sub-zero" } },
+
+    { "eventId": "x1-e04", "timestamp": "2026-10-06T16:00:10Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "punch", "hit": true, "damage": 10, "round": 1 } },
+    { "eventId": "x1-e05", "timestamp": "2026-10-06T16:00:12Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p1", "move": "uppercut", "hit": false, "damage": 0, "round": 1 } },
+    { "eventId": "x1-e06", "timestamp": "2026-10-06T16:00:12Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "BLOCK", "data": { "attackerId": "p2", "round": 1 } },
+    { "eventId": "x1-e07", "timestamp": "2026-10-06T16:00:15Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "SPECIAL_MOVE", "data": { "targetId": "p2", "name": "spear", "hit": true, "damage": 15, "round": 1 } },
+    { "eventId": "x1-e08", "timestamp": "2026-10-06T16:00:17Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p2", "hits": 4, "damage": 30, "round": 1 } },
+    { "eventId": "x1-e09", "timestamp": "2026-10-06T16:00:20Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "THROW", "data": { "targetId": "p2", "damage": 15, "round": 1 } },
+    { "eventId": "x1-e10", "timestamp": "2026-10-06T16:00:20.500Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "KNOCKDOWN", "data": { "targetId": "p2", "round": 1 } },
+    { "eventId": "x1-e11", "timestamp": "2026-10-06T16:00:25Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "uppercut", "hit": true, "damage": 30, "round": 1 } },
+    { "eventId": "x1-e12", "timestamp": "2026-10-06T16:00:26Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 1, "remainingHealth": 100, "method": "ko" } },
+
+    { "eventId": "x1-e13", "timestamp": "2026-10-06T16:00:40Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_ACTION", "action": "SPECIAL_MOVE", "data": { "targetId": "p1", "name": "ice_ball", "hit": true, "damage": 10, "round": 2 } },
+    { "eventId": "x1-e14", "timestamp": "2026-10-06T16:00:42Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p1", "hits": 5, "damage": 35, "round": 2 } },
+    { "eventId": "x1-e15", "timestamp": "2026-10-06T16:00:43Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "COMBO_BREAKER", "data": { "attackerId": "p2", "round": 2 } },
+    { "eventId": "x1-e16", "timestamp": "2026-10-06T16:00:45Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p1", "move": "kick", "hit": true, "damage": 30, "round": 2 } },
+    { "eventId": "x1-e17", "timestamp": "2026-10-06T16:00:47Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "FATAL_BLOW", "data": { "targetId": "p2", "hit": true, "damage": 40, "health": 25, "round": 2 } },
+    { "eventId": "x1-e18", "timestamp": "2026-10-06T16:00:50Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p2", "hits": 3, "damage": 25, "round": 2 } },
+    { "eventId": "x1-e19", "timestamp": "2026-10-06T16:00:52Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p2", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p1", "move": "punch", "hit": false, "damage": 0, "round": 2 } },
+    { "eventId": "x1-e20", "timestamp": "2026-10-06T16:00:53Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "uppercut", "hit": true, "damage": 35, "round": 2 } },
+    { "eventId": "x1-e21", "timestamp": "2026-10-06T16:00:54Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 2, "remainingHealth": 25, "method": "ko" } },
+    { "eventId": "x1-e22", "timestamp": "2026-10-06T16:00:58Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "playerId": "p1", "type": "PLAYER_ACTION", "action": "FATALITY", "data": { "targetId": "p2", "name": "toasty" } },
+
+    { "eventId": "x1-e23", "timestamp": "2026-10-06T16:00:59Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-001", "type": "MATCH_FINISHED", "data": {} }
+  ]
+}
