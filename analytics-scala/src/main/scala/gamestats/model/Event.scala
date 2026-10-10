@@ -4,12 +4,12 @@ import java.time.Instant
 
 /** Tipos generales de evento, comunes a todos los juegos. */
 enum EventType:
-  case MatchStarted, MatchFinished, PlayerJoined, PlayerLeft,
+  case MatchStarted, MatchFinished, MatchPaused, MatchResumed, PlayerJoined, PlayerLeft,
        PlayerDisconnected, PlayerReconnected, PlayerAction
 
   /** Solo los eventos de partida pueden venir sin `playerId`. */
   def requiresPlayer: Boolean = this match
-    case MatchStarted | MatchFinished => false
+    case MatchStarted | MatchFinished | MatchPaused | MatchResumed => false
     case PlayerJoined | PlayerLeft | PlayerDisconnected | PlayerReconnected | PlayerAction => true
 
 enum Card:
@@ -58,8 +58,9 @@ case class Event(
 )
 
 /** Lote de una partida ya validado, con los eventos en orden cronológico.
-  * `skipped` lista los eventos descartados por tener la `data` de su acción
-  * mal formada ("eventId: motivo"); no participan del análisis.
+  * `skipped` lista los eventos descartados ("eventId: motivo"), ya sea por tener
+  * la `data` de su acción mal formada o por romper una validación de contexto;
+  * no participan del análisis.
   */
 case class MatchBatch(
     matchId: String,

@@ -245,6 +245,8 @@ object Codecs:
   private def parseEventType(s: String): Result[EventType] = s match
     case "MATCH_STARTED"       => Right(EventType.MatchStarted)
     case "MATCH_FINISHED"      => Right(EventType.MatchFinished)
+    case "MATCH_PAUSED"        => Right(EventType.MatchPaused)
+    case "MATCH_RESUMED"       => Right(EventType.MatchResumed)
     case "PLAYER_JOINED"       => Right(EventType.PlayerJoined)
     case "PLAYER_LEFT"         => Right(EventType.PlayerLeft)
     case "PLAYER_DISCONNECTED" => Right(EventType.PlayerDisconnected)

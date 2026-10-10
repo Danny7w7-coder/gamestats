@@ -55,9 +55,12 @@ object AnalyticsRoutes:
   def analyzeBody(body: String): Either[String, MatchAnalysis] =
     parseBody(body).flatMap(Analyzer.analyze)
 
-  /** Texto del request -> lote validado (con sus eventos descartados en `skipped`). */
+  /** Texto del request -> lote validado: primero el formato de cada evento
+    * (Codecs) y después el contexto de la partida (Analyzer.validate). Los
+    * eventos descartados en cualquiera de los dos pasos quedan en `skipped`.
+    */
   def parseBody(body: String): Either[String, MatchBatch] =
-    Codecs.readJson(body).flatMap(Codecs.parseBatch)
+    Codecs.readJson(body).flatMap(Codecs.parseBatch).flatMap(Analyzer.validate)
 
   /** Estadísticas de un jugador en todas sus partidas; None si no jugó ninguna. */
   def playerReport(playerId: String, results: List[MatchAnalysis]): Option[ujson.Value] =

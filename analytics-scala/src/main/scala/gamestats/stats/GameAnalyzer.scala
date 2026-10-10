@@ -2,6 +2,7 @@ package gamestats.stats
 
 import gamestats.model.*
 import gamestats.rules.Rule
+import gamestats.validation.{ContextCheck, Validation}
 
 /** Contrato que cumple el análisis de cada juego. */
 trait GameAnalyzer:
@@ -10,6 +11,9 @@ trait GameAnalyzer:
 
   /** Reglas de patrones que aplican a este juego (ninguna por defecto). */
   def rules: List[Rule] = Nil
+
+  /** Validaciones de contexto propias del juego (ninguna por defecto). */
+  def context: ContextCheck = ContextCheck.NoCheck
 
 /** Analyzer mínimo: solo estadísticas genéricas, sin métricas por jugador.
   * Sirve para cualquier juego mientras no tenga uno propio.
@@ -33,13 +37,22 @@ object Analyzer:
       .map(a => a.gameId -> a) // map: cada analyzer queda indexado por su gameId
       .toMap
 
+  private def analyzerFor(batch: MatchBatch): Either[String, GameAnalyzer] =
+    registry.get(batch.gameId).toRight(s"no hay analyzer para gameId '${batch.gameId}'")
+
+  /** Pura: descarta los eventos que rompen las validaciones de contexto (las
+    * comunes y las del juego). Si no queda ninguno, Left.
+    */
+  def validate(batch: MatchBatch): Either[String, MatchBatch] =
+    analyzerFor(batch)
+      .map(analyzer => Validation.run(batch, analyzer.context))
+      .filterOrElse(_.events.nonEmpty, "todos los eventos se descartaron")
+
   /** Pura: busca el analyzer del juego, calcula las estadísticas y corre todas
-    * sus reglas; si el juego no tiene analyzer, Left.
+    * sus reglas; si el juego no tiene analyzer, Left. Espera un lote ya validado.
     */
   def analyze(batch: MatchBatch): Either[String, MatchAnalysis] =
-    registry
-      .get(batch.gameId)
-      .toRight(s"no hay analyzer para gameId '${batch.gameId}'")
+    analyzerFor(batch)
       .map { analyzer =>
         val analysis = analyzer.analyze(batch)
         // flatMap: cada regla devuelve 0..n patrones y se juntan en una sola lista.
