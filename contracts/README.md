@@ -26,13 +26,13 @@ Decisiones:
 
 ## Catálogo de eventos
 
-Los 8 tipos generales sirven para los cuatro juegos: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED`. Además, cada juego tiene sus acciones (`type: "PLAYER_ACTION"`): 12 en racing y 17 en los demás. El `data` exacto de cada una, con sus rangos y valores permitidos, está en `event.schema.json` (`$defs`).
+Los 8 tipos generales sirven para los cuatro juegos: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED`. Además, cada juego tiene sus acciones (`type: "PLAYER_ACTION"`): 12 en racing, 17 en football, 14 en fighting y 17 en tetris. Juegos de referencia: racing → Mario Kart, football → partido rápido de FIFA, fighting → Street Fighter, tetris → Tetris / Tetris 99. El `data` exacto de cada una, con sus rangos y valores permitidos, está en `event.schema.json` (`$defs`).
 
 | Juego | `MATCH_STARTED.data` | Acciones |
 |---|---|---|
 | `racing` | `track`, `laps` | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED`, `ITEM_PICKUP`, `ITEM_USED`, `DRIFT`, `COLLISION`, `SPIN`, `RESPAWN`, `PENALTY`, `DNF` |
 | `football` | `homeTeam`, `awayTeam` (y `PLAYER_JOINED.data.teamId`) | `PASS`, `SHOT`, `GOAL`, `FOUL`, `SAVE`, `TACKLE`, `INTERCEPTION`, `CORNER`, `OFFSIDE`, `SUBSTITUTION`, `OWN_GOAL`, `PENALTY_KICK`, `FREE_KICK`, `THROW_IN`, `DRIBBLE`, `CLEARANCE`, `INJURY` |
-| `fighting` | `stage`, `rounds` (1, 3 o 5) (y `PLAYER_JOINED.data.character`) | `ATTACK`, `SPECIAL_MOVE`, `SUPER_MOVE`, `THROW`, `COMBO`, `COUNTER_HIT`, `BLOCK`, `PARRY`, `DODGE`, `KNOCKDOWN`, `RECOVERY`, `STUN`, `GUARD_BREAK`, `METER_GAIN`, `RAGE_MODE`, `TAUNT`, `ROUND_WON` |
+| `fighting` | `stage`, `rounds` (1, 3 o 5) (y `PLAYER_JOINED.data.character`) | `ATTACK`, `SPECIAL_MOVE`, `SUPER_MOVE`, `THROW`, `COMBO`, `COUNTER_HIT`, `BLOCK`, `PARRY`, `KNOCKDOWN`, `RECOVERY`, `STUN`, `GUARD_BREAK`, `METER_GAIN`, `ROUND_WON` |
 | `tetris` | `mode` (`marathon`/`versus`), `startLevel` (1–15) | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED`, `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR`, `COMBO_BROKEN`, `LEVEL_UP`, `SPEED_UP`, `STACK_HEIGHT`, `GARBAGE_SENT`, `GARBAGE_RECEIVED`, `TOP_OUT` |
 
 ## Validaciones de contexto
@@ -77,8 +77,8 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 | `football_match_ok.json` | foot-001 | A gana 2-1 (goles A, A, B → **sin** COMEBACK). p2: 3 pases, 2 exitosos. p4: 0 tiros. Un gol sin asistencia. |
 | `football_comeback.json` | foot-002 | A gana 2-1 remontando (goles B, A, A → **COMEBACK**). p4 recibe roja y no vuelve a aparecer. |
 | `football_full_ok.json` | foot-003 | Las 17 acciones de football y el entretiempo como pausa. A gana 3-0: autogol de p5 (B), penal anotado por p2 y gol de p7 (entró por p3 en el 60') con asistencia de p2. B falla un penal y p1 (portero) hace 2 atajadas → A con la valla invicta. |
-| `fighting_match_ok.json` | fight-001 | Mejor de 3. p1 gana 2-0: round 1 sin recibir daño (vida 100, `SUPER_MOVE` con el medidor lleno) y round 2 por KO con vida 40. 16 de las 17 acciones (falta `RAGE_MODE`). |
-| `fighting_comeback.json` | fight-002 | Mejor de 3. p3 gana el round 1 por tiempo (vida 60); p4 gana los rounds 2 y 3 → **remontada**. En el round 3 p4 entra en `RAGE_MODE` (vida 25) y gana con un `SUPER_MOVE` usando medidor guardado del round 2. |
+| `fighting_match_ok.json` | fight-001 | Mejor de 3. p1 gana 2-0: round 1 sin recibir daño (vida 100, `SUPER_MOVE` con el medidor lleno) y round 2 por KO con vida 40. Usa las 14 acciones. |
+| `fighting_comeback.json` | fight-002 | Mejor de 3. p3 gana el round 1 por tiempo (vida 60); p4 gana los rounds 2 y 3 → **remontada**. En el round 3 p4 queda con vida 25 y gana con un `SUPER_MOVE` usando medidor guardado del round 2. |
 | `tetris_versus_ok.json` | tetris-001 | Versus. p1 hace dos tetris seguidos (back-to-back) y un T-spin doble, manda 12 líneas de basura y sube al nivel 2; p2 llega al tope (`TOP_OUT`). Puntos: p1 3200, p2 200. 16 de las 17 acciones (falta `ALL_CLEAR`). |
 | `tetris_marathon_ok.json` | tetris-002 | Marathon de un jugador (p3) desde el nivel 5, con pausa. 3 T-spins (0, 1 y 2 líneas), un tetris que deja el tablero vacío (`ALL_CLEAR`), niveles 6 y 7, termina en `TOP_OUT`. |
 | `racing_invalid_events.json` | race-997 | 8 eventos con `data` inválida + 12 que rompen validaciones de contexto. |

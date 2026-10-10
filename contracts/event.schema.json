@@ -92,14 +92,11 @@
     { "if": { "properties": { "action": { "const": "COUNTER_HIT" } },       "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/targetDamage" } } } },
     { "if": { "properties": { "action": { "const": "BLOCK" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/defense" } } } },
     { "if": { "properties": { "action": { "const": "PARRY" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/defense" } } } },
-    { "if": { "properties": { "action": { "const": "DODGE" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/roundOnly" } } } },
     { "if": { "properties": { "action": { "const": "KNOCKDOWN" } },         "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/targetRound" } } } },
     { "if": { "properties": { "action": { "const": "RECOVERY" } },          "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/roundOnly" } } } },
     { "if": { "properties": { "action": { "const": "STUN" } },              "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/stun" } } } },
     { "if": { "properties": { "action": { "const": "GUARD_BREAK" } },       "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/targetRound" } } } },
     { "if": { "properties": { "action": { "const": "METER_GAIN" } },        "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/meterGain" } } } },
-    { "if": { "properties": { "action": { "const": "RAGE_MODE" } },         "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/rageMode" } } } },
-    { "if": { "properties": { "action": { "const": "TAUNT" } },             "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/roundOnly" } } } },
     { "if": { "properties": { "action": { "const": "ROUND_WON" } },         "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/roundWon" } } } },
 
     { "if": { "properties": { "action": { "const": "PIECE_SPAWNED" } },     "required": ["action"] }, "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/pieceOnly" } } } },
@@ -176,7 +173,6 @@
     "targetRound":  { "type": "object", "required": ["targetId", "round"], "properties": { "targetId": { "$ref": "#/$defs/ref" }, "round": { "$ref": "#/$defs/round" } } },
     "stun":         { "type": "object", "required": ["targetId", "durationMs", "round"], "properties": { "targetId": { "$ref": "#/$defs/ref" }, "durationMs": { "type": "integer", "minimum": 1 }, "round": { "$ref": "#/$defs/round" } } },
     "meterGain":    { "type": "object", "required": ["amount", "round"], "properties": { "amount": { "type": "integer", "minimum": 1, "maximum": 100 }, "round": { "$ref": "#/$defs/round" } } },
-    "rageMode":     { "type": "object", "required": ["health", "round"], "properties": { "health": { "type": "integer", "minimum": 1, "maximum": 30 }, "round": { "$ref": "#/$defs/round" } } },
     "roundWon":     { "type": "object", "required": ["round", "remainingHealth", "method"], "properties": { "round": { "$ref": "#/$defs/round" }, "remainingHealth": { "type": "integer", "minimum": 1, "maximum": 100 }, "method": { "enum": ["ko", "timeout"] } } },
 
     "pieceOnly":       { "type": "object", "required": ["piece"], "properties": { "piece": { "$ref": "#/$defs/piece" } } },

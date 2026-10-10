@@ -31,12 +31,11 @@
     { "eventId": "x2-e20", "timestamp": "2026-10-06T17:02:20Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p4", "hits": 4, "damage": 40, "round": 3 } },
     { "eventId": "x2-e21", "timestamp": "2026-10-06T17:02:23Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p4", "move": "punch", "hit": true, "damage": 15, "round": 3 } },
     { "eventId": "x2-e22", "timestamp": "2026-10-06T17:02:26Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "COUNTER_HIT", "data": { "targetId": "p4", "damage": 20, "round": 3 } },
-    { "eventId": "x2-e23", "timestamp": "2026-10-06T17:02:27Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "RAGE_MODE", "data": { "health": 25, "round": 3 } },
-    { "eventId": "x2-e24", "timestamp": "2026-10-06T17:02:30Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "METER_GAIN", "data": { "amount": 60, "round": 3 } },
-    { "eventId": "x2-e25", "timestamp": "2026-10-06T17:02:33Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "SUPER_MOVE", "data": { "targetId": "p3", "hit": true, "damage": 60, "round": 3 } },
-    { "eventId": "x2-e26", "timestamp": "2026-10-06T17:02:36Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p3", "hits": 3, "damage": 40, "round": 3 } },
-    { "eventId": "x2-e27", "timestamp": "2026-10-06T17:02:37Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 3, "remainingHealth": 25, "method": "ko" } },
+    { "eventId": "x2-e23", "timestamp": "2026-10-06T17:02:30Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "METER_GAIN", "data": { "amount": 60, "round": 3 } },
+    { "eventId": "x2-e24", "timestamp": "2026-10-06T17:02:33Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "SUPER_MOVE", "data": { "targetId": "p3", "hit": true, "damage": 60, "round": 3 } },
+    { "eventId": "x2-e25", "timestamp": "2026-10-06T17:02:36Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p3", "hits": 3, "damage": 40, "round": 3 } },
+    { "eventId": "x2-e26", "timestamp": "2026-10-06T17:02:37Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "playerId": "p4", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 3, "remainingHealth": 25, "method": "ko" } },
 
-    { "eventId": "x2-e28", "timestamp": "2026-10-06T17:02:38Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "type": "MATCH_FINISHED", "data": {} }
+    { "eventId": "x2-e27", "timestamp": "2026-10-06T17:02:38Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-002", "type": "MATCH_FINISHED", "data": {} }
   ]
 }
