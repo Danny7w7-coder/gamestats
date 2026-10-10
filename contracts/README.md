@@ -19,25 +19,25 @@ Decisiones:
 - Racing es una carrera arcade por vueltas y posiciones. Un jugador con `DNF` no aparece en `MATCH_FINISHED.data.ranking`.
 - Racing, objetos: cada jugador lleva **un objeto a la vez**. Lo agarra con `ITEM_PICKUP` y al usarlo (`ITEM_USED`) queda con la mano vacía. `boost` = nitro (lleva `durationMs`), `shield` = escudo, `oil` = mancha de aceite.
 - Football: todo `GOAL` va precedido de un `SHOT` con `onTarget: true` o de un `PENALTY_KICK` con `scored: true` del mismo jugador. `OWN_GOAL` lleva el `teamId` de quien lo hace y suma para el **otro** equipo. El que sale en una `SUBSTITUTION` (y el expulsado con roja) no genera más eventos.
-- Fighting: el medidor de cada jugador arranca en 0, sube con `METER_GAIN` (tope 100), baja con `SPECIAL_MOVE` (`meterCost`) y `SUPER_MOVE` (lo deja en 0), y se conserva entre rounds.
+- Fighting es estilo Mortal Kombat, 1 contra 1 por rounds. `FATAL_BLOW` es un golpe muy fuerte que se puede usar una vez por pelea y solo con la vida propia en 30 o menos. `FATALITY` es el remate final: la hace el ganador de la pelea después de su último `ROUND_WON` y después ya no hay más acciones.
 - Tetris: en `marathon` cada jugador juega solo (puede haber varios); `GARBAGE_SENT`/`GARBAGE_RECEIVED` solo existen en `versus`.
 - `winner`: racing → `playerId` (`ranking[0]`); football → `teamId`; fighting → `playerId` con más `ROUND_WON`; tetris → `playerId` con más puntos (suma de `LINES_CLEARED.points`); empate o sin datos → `null`.
 - `score` y `teamStats` solo aparecen en football. `patterns[].playerId` es `null` en patrones de equipo.
 
 ## Catálogo de eventos
 
-Los 8 tipos generales sirven para los cuatro juegos: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED`. Además, cada juego tiene sus acciones (`type: "PLAYER_ACTION"`): 12 en racing, 17 en football, 14 en fighting y 17 en tetris. Juegos de referencia: racing → Mario Kart, football → partido rápido de FIFA, fighting → Street Fighter, tetris → Tetris / Tetris 99. El `data` exacto de cada una, con sus rangos y valores permitidos, está en `event.schema.json` (`$defs`).
+Los 8 tipos generales sirven para los cuatro juegos: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED`. Además, cada juego tiene sus acciones (`type: "PLAYER_ACTION"`): 12 en racing, 17 en football, 10 en fighting y 17 en tetris. Juegos de referencia: racing → Mario Kart, football → partido rápido de FIFA, fighting → Mortal Kombat (versión simple), tetris → Tetris / Tetris 99. El `data` exacto de cada una, con sus rangos y valores permitidos, está en `event.schema.json` (`$defs`).
 
 | Juego | `MATCH_STARTED.data` | Acciones |
 |---|---|---|
 | `racing` | `track`, `laps` | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED`, `ITEM_PICKUP`, `ITEM_USED`, `DRIFT`, `COLLISION`, `SPIN`, `RESPAWN`, `PENALTY`, `DNF` |
 | `football` | `homeTeam`, `awayTeam` (y `PLAYER_JOINED.data.teamId`) | `PASS`, `SHOT`, `GOAL`, `FOUL`, `SAVE`, `TACKLE`, `INTERCEPTION`, `CORNER`, `OFFSIDE`, `SUBSTITUTION`, `OWN_GOAL`, `PENALTY_KICK`, `FREE_KICK`, `THROW_IN`, `DRIBBLE`, `CLEARANCE`, `INJURY` |
-| `fighting` | `stage`, `rounds` (1, 3 o 5) (y `PLAYER_JOINED.data.character`) | `ATTACK`, `SPECIAL_MOVE`, `SUPER_MOVE`, `THROW`, `COMBO`, `COUNTER_HIT`, `BLOCK`, `PARRY`, `KNOCKDOWN`, `RECOVERY`, `STUN`, `GUARD_BREAK`, `METER_GAIN`, `ROUND_WON` |
+| `fighting` | `stage`, `rounds` (1, 3 o 5) (y `PLAYER_JOINED.data.character`) | `ATTACK`, `SPECIAL_MOVE`, `COMBO`, `THROW`, `BLOCK`, `COMBO_BREAKER`, `KNOCKDOWN`, `FATAL_BLOW`, `ROUND_WON`, `FATALITY` |
 | `tetris` | `mode` (`marathon`/`versus`), `startLevel` (1–15) | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED`, `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR`, `COMBO_BROKEN`, `LEVEL_UP`, `SPEED_UP`, `STACK_HEIGHT`, `GARBAGE_SENT`, `GARBAGE_RECEIVED`, `TOP_OUT` |
 
 ## Validaciones de contexto
 
-El schema valida cada evento por separado (tipos, rangos, enums, campos obligatorios, y en fighting que un golpe fallado tenga `damage: 0`). Las reglas de abajo dependen de **otros eventos de la partida**, así que no caben en un schema y las aplica Scala recorriendo los eventos en orden. Un evento que rompe una regla se descarta y **no cambia el estado** (por ejemplo, un `METER_GAIN` descartado no suma medidor).
+El schema valida cada evento por separado (tipos, rangos, enums, campos obligatorios, y en fighting que un golpe fallado tenga `damage: 0`). Las reglas de abajo dependen de **otros eventos de la partida**, así que no caben en un schema y las aplica Scala recorriendo los eventos en orden. Un evento que rompe una regla se descarta y **no cambia el estado** (por ejemplo, un `ITEM_PICKUP` descartado no le da el objeto al jugador).
 
 | Juego | Regla |
 |---|---|
@@ -54,9 +54,10 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 | Football | El que sale en una `SUBSTITUTION` o recibe roja no tiene más eventos. |
 | Football | `PENALTY_KICK` con `scored: true`: la siguiente acción de ese jugador es su `GOAL` (si no, se descarta el penal). |
 | Fighting | `round` ≤ `MATCH_STARTED.data.rounds`. |
-| Fighting | `RECOVERY` solo después de un `KNOCKDOWN` contra ese jugador en ese round, una vez por derribo. |
-| Fighting | `SPECIAL_MOVE` solo si el medidor alcanza para `meterCost`; `SUPER_MOVE` solo con el medidor en 100. |
+| Fighting | `COMBO_BREAKER` solo después de un `COMBO` del rival (`attackerId`) contra ese jugador en ese round, una vez por combo. |
+| Fighting | `FATAL_BLOW` una sola vez por pelea por jugador. |
 | Fighting | Un solo `ROUND_WON` por round. |
+| Fighting | `FATALITY` solo la hace quien ya ganó la pelea (la mayoría de los rounds), y después de ella no hay más acciones. |
 | Tetris | `LEVEL_UP`: el nivel nuevo es mayor que el actual del jugador (al inicio, `startLevel`). |
 | Tetris | `GARBAGE_SENT` / `GARBAGE_RECEIVED` solo en modo `versus`. |
 | Tetris | Después de un `TOP_OUT` el jugador no tiene más eventos. |
@@ -77,13 +78,13 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 | `football_match_ok.json` | foot-001 | A gana 2-1 (goles A, A, B → **sin** COMEBACK). p2: 3 pases, 2 exitosos. p4: 0 tiros. Un gol sin asistencia. |
 | `football_comeback.json` | foot-002 | A gana 2-1 remontando (goles B, A, A → **COMEBACK**). p4 recibe roja y no vuelve a aparecer. |
 | `football_full_ok.json` | foot-003 | Las 17 acciones de football y el entretiempo como pausa. A gana 3-0: autogol de p5 (B), penal anotado por p2 y gol de p7 (entró por p3 en el 60') con asistencia de p2. B falla un penal y p1 (portero) hace 2 atajadas → A con la valla invicta. |
-| `fighting_match_ok.json` | fight-001 | Mejor de 3. p1 gana 2-0: round 1 sin recibir daño (vida 100, `SUPER_MOVE` con el medidor lleno) y round 2 por KO con vida 40. Usa las 14 acciones. |
-| `fighting_comeback.json` | fight-002 | Mejor de 3. p3 gana el round 1 por tiempo (vida 60); p4 gana los rounds 2 y 3 → **remontada**. En el round 3 p4 queda con vida 25 y gana con un `SUPER_MOVE` usando medidor guardado del round 2. |
+| `fighting_match_ok.json` | fight-001 | Mejor de 3, Scorpion (p1) vs Sub-Zero (p2). p1 gana 2-0: round 1 sin recibir daño (vida 100 → *flawless victory*) y round 2 por KO con vida 25, después de cortar un combo y usar su `FATAL_BLOW`. Termina con una `FATALITY`. Usa las 10 acciones. |
+| `fighting_comeback.json` | fight-002 | Mejor de 3, Liu Kang (p3) vs Kitana (p4). p3 gana el round 1 por tiempo (vida 60); p4 gana los rounds 2 y 3 → **remontada**. En el round 3 p4 queda con vida 25 y da vuelta la pelea con su `FATAL_BLOW`. Sin fatality. |
 | `tetris_versus_ok.json` | tetris-001 | Versus. p1 hace dos tetris seguidos (back-to-back) y un T-spin doble, manda 12 líneas de basura y sube al nivel 2; p2 llega al tope (`TOP_OUT`). Puntos: p1 3200, p2 200. 16 de las 17 acciones (falta `ALL_CLEAR`). |
 | `tetris_marathon_ok.json` | tetris-002 | Marathon de un jugador (p3) desde el nivel 5, con pausa. 3 T-spins (0, 1 y 2 líneas), un tetris que deja el tablero vacío (`ALL_CLEAR`), niveles 6 y 7, termina en `TOP_OUT`. |
 | `racing_invalid_events.json` | race-997 | 8 eventos con `data` inválida + 12 que rompen validaciones de contexto. |
 | `football_invalid_events.json` | foot-997 | 5 + 7. |
-| `fighting_invalid_events.json` | fight-997 | 5 + 8. |
+| `fighting_invalid_events.json` | fight-997 | 6 + 10. |
 | `tetris_invalid_events.json` | tetris-997 | 7 + 4. |
 | `invalid_missing_matchid.json` | — | Lote sin `matchId` → `400`. |
 | `invalid_bad_timestamp.json` | race-998 | Un `timestamp` que no parsea → `400`. |
