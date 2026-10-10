@@ -26,6 +26,17 @@ enum DnfReason(val key: String):
   case Mechanical   extends DnfReason("mechanical")
   case Disqualified extends DnfReason("disqualified")
 
+/** Golpes básicos de fighting. */
+enum Move(val key: String):
+  case Punch    extends Move("punch")
+  case Kick     extends Move("kick")
+  case Uppercut extends Move("uppercut")
+
+/** Cómo se ganó un round: por KO o porque se acabó el tiempo. */
+enum WinMethod(val key: String):
+  case Ko      extends WinMethod("ko")
+  case Timeout extends WinMethod("timeout")
+
 /** Acción de juego dentro de un PLAYER_ACTION. `sealed` hace que el compilador
   * avise si un `match` olvida algún caso.
   */
@@ -56,6 +67,16 @@ sealed trait GameAction:
     case _: Interception     => "INTERCEPTION"
     case _: Dribble          => "DRIBBLE"
     case _: Corner           => "CORNER"
+    case _: Attack           => "ATTACK"
+    case _: SpecialMove      => "SPECIAL_MOVE"
+    case _: Combo            => "COMBO"
+    case _: Throw            => "THROW"
+    case _: Block            => "BLOCK"
+    case _: ComboBreaker     => "COMBO_BREAKER"
+    case _: Knockdown        => "KNOCKDOWN"
+    case _: FatalBlow        => "FATAL_BLOW"
+    case _: RoundWon         => "ROUND_WON"
+    case _: Fatality         => "FATALITY"
     case UnknownAction(n, _) => n
 
 // Racing
@@ -86,6 +107,19 @@ case class Tackle(teamId: String, targetId: String, success: Boolean, minute: In
 case class Interception(teamId: String, minute: Int)                                               extends GameAction
 case class Dribble(teamId: String, success: Boolean, minute: Int)                                  extends GameAction
 case class Corner(teamId: String, minute: Int)                                                     extends GameAction
+
+// Fighting (estilo Mortal Kombat)
+case class Attack(targetId: String, move: Move, hit: Boolean, damage: Int, round: Int)              extends GameAction
+case class SpecialMove(targetId: String, name: String, hit: Boolean, damage: Int, round: Int)       extends GameAction
+case class Combo(targetId: String, hits: Int, damage: Int, round: Int)                             extends GameAction
+case class Throw(targetId: String, damage: Int, round: Int)                                        extends GameAction
+case class Block(attackerId: String, round: Int)                                                   extends GameAction
+case class ComboBreaker(attackerId: String, round: Int)                                            extends GameAction
+case class Knockdown(targetId: String, round: Int)                                                 extends GameAction
+/** `health` es la vida de quien lo usa (máximo 30: solo se puede con poca vida). */
+case class FatalBlow(targetId: String, hit: Boolean, damage: Int, health: Int, round: Int)         extends GameAction
+case class RoundWon(round: Int, remainingHealth: Int, method: WinMethod)                           extends GameAction
+case class Fatality(targetId: String, name: String)                                                extends GameAction
 
 /** Acción que ningún juego conoce todavía: se conserva tal cual en vez de fallar. */
 case class UnknownAction(name: String, raw: ujson.Value) extends GameAction

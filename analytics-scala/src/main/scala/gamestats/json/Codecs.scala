@@ -166,6 +166,38 @@ object Codecs:
         ctx(for team <- str(f, "teamId"); ok <- bool(f, "success"); min <- minute(f) yield Dribble(team, ok, min))
       case "CORNER" =>
         ctx(for team <- str(f, "teamId"); min <- minute(f) yield Corner(team, min))
+      // Fighting (round: 1..5; damage: 0..100, y 0 si el golpe falla)
+      case "ATTACK" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); move <- oneOf(f, "move", Move.values.map(m => m.key -> m).toMap)
+                hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
+            yield Attack(target, move, hit, dmg, r))
+      case "SPECIAL_MOVE" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name")
+                hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
+            yield SpecialMove(target, name, hit, dmg, r))
+      case "COMBO" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); hits <- intMin(f, "hits", 2)
+                dmg <- intIn(f, "damage", 1, 100); r <- round(f)
+            yield Combo(target, hits, dmg, r))
+      case "THROW" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); dmg <- intIn(f, "damage", 1, 100); r <- round(f)
+            yield Throw(target, dmg, r))
+      case "BLOCK" =>
+        ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield Block(attacker, r))
+      case "COMBO_BREAKER" =>
+        ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield ComboBreaker(attacker, r))
+      case "KNOCKDOWN" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); r <- round(f) yield Knockdown(target, r))
+      case "FATAL_BLOW" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); hit <- bool(f, "hit"); dmg <- strike(f, hit)
+                health <- intIn(f, "health", 1, 30); r <- round(f)
+            yield FatalBlow(target, hit, dmg, health, r))
+      case "ROUND_WON" =>
+        ctx(for r <- round(f); health <- intIn(f, "remainingHealth", 1, 100)
+                method <- oneOf(f, "method", WinMethod.values.map(m => m.key -> m).toMap)
+            yield RoundWon(r, health, method))
+      case "FATALITY" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name") yield Fatality(target, name))
       // Acción que ningún analyzer conoce: no es error, se conserva.
       case other =>
         Right(UnknownAction(other, data))
@@ -367,6 +399,13 @@ object Codecs:
 
   /** Minuto de football: informativo, pero dentro del rango del schema. */
   private def minute(f: Fields): Result[Int] = intIn(f, "minute", 0, 130)
+
+  /** Round de fighting (1 a 5; contra el máximo de la pelea lo revisa FightingCheck). */
+  private def round(f: Fields): Result[Int] = intIn(f, "round", 1, 5)
+
+  /** Daño de un golpe que puede fallar: 0..100, y exactamente 0 si no conectó. */
+  private def strike(f: Fields, hit: Boolean): Result[Int] =
+    intIn(f, "damage", 0, 100).filterOrElse(d => hit || d == 0, "un golpe que falla no hace daño ('damage' debe ser 0)")
 
   /** Valor dentro de una lista cerrada (los `enum` del schema). */
   private def oneOf[A](f: Fields, key: String, options: Map[String, A]): Result[A] =

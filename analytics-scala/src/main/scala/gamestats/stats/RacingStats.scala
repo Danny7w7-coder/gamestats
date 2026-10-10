@@ -73,11 +73,7 @@ object RacingAnalyzer extends GameAnalyzer:
   val effectiveTimeMs: List[Event] => Double =
     events => (lapTimes(events).sum + penaltySeconds(events) * 1000L).toDouble
 
-  /** Cuántas acciones del jugador cumplen el patrón. Recibe una función parcial
-    * (`{ case _: Overtake => }`) y cuenta los eventos en los que está definida.
-    */
-  def countOf(pattern: PartialFunction[GameAction, Any]): List[Event] => Double =
-    _.flatMap(_.action).count(pattern.isDefinedAt).toDouble
+  import GenericStats.countOf
 
   val overtakes: List[Event] => Double   = countOf { case _: Overtake => }
   val itemsPicked: List[Event] => Double = countOf { case _: ItemPickup => }

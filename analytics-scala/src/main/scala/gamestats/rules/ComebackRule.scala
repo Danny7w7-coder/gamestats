@@ -1,7 +1,7 @@
 package gamestats.rules
 
 import gamestats.model.*
-import gamestats.stats.{FootballAnalyzer, RacingAnalyzer}
+import gamestats.stats.{FightingAnalyzer, FootballAnalyzer, RacingAnalyzer}
 
 /** COMEBACK en racing: el ganador estuvo en 3° lugar o peor en algún momento. */
 object RacingComebackRule extends Rule:
@@ -36,6 +36,19 @@ object RacingComebackRule extends Rule:
         case _                                 => Nil
       }
       .groupMap(_._1)(_._2) // groupMap: agrupa por jugador y se queda solo con la posición
+
+/** COMEBACK en fighting: el que ganó la pelea había perdido el primer round. */
+object FightingComebackRule extends Rule:
+
+  val name: String = "COMEBACK"
+
+  def detect(batch: MatchBatch): List[Pattern] =
+    // for sobre Option: si falta el ganador o el round 1, no hay patrón.
+    (for
+      winner      <- FightingAnalyzer.winner(batch)
+      (_, first)  <- FightingAnalyzer.roundWinners(batch).find(_._1 == 1)
+      if first != winner
+    yield Pattern(name, Some(winner), s"$winner perdió el primer round y ganó la pelea")).toList
 
 /** COMEBACK en football: el equipo que ganó estuvo perdiendo en algún momento. */
 object FootballComebackRule extends Rule:
