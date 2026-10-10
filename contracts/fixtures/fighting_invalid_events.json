@@ -1,0 +1,36 @@
+{
+  "matchId": "fight-997",
+  "gameId": "fighting",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-08T12:00:00Z",
+  "finishedAt": "2026-10-08T12:00:33Z",
+  "players": ["p1", "p2"],
+  "events": [
+    { "eventId": "xi-e01", "timestamp": "2026-10-08T12:00:00Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "type": "MATCH_STARTED", "data": { "stage": "dojo", "rounds": 1 } },
+    { "eventId": "xi-e02", "timestamp": "2026-10-08T12:00:01Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_JOINED", "data": { "character": "ryu" } },
+    { "eventId": "xi-e03", "timestamp": "2026-10-08T12:00:02Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p2", "type": "PLAYER_JOINED", "data": { "character": "ken" } },
+
+    { "eventId": "bad-data-miss-with-damage", "timestamp": "2026-10-08T12:00:05Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "punch", "hit": false, "damage": 10, "round": 1 } },
+    { "eventId": "bad-data-move-type", "timestamp": "2026-10-08T12:00:06Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "headbutt", "hit": true, "damage": 10, "round": 1 } },
+    { "eventId": "bad-data-combo-hits", "timestamp": "2026-10-08T12:00:07Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p2", "hits": 1, "damage": 10, "round": 1 } },
+    { "eventId": "bad-data-rage-health", "timestamp": "2026-10-08T12:00:08Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "RAGE_MODE", "data": { "health": 50, "round": 1 } },
+    { "eventId": "bad-data-round-zero", "timestamp": "2026-10-08T12:00:09Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DODGE", "data": { "round": 0 } },
+
+    { "eventId": "bad-ctx-round-over-max", "timestamp": "2026-10-08T12:00:10Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "punch", "hit": true, "damage": 20, "round": 2 } },
+    { "eventId": "bad-ctx-target-self", "timestamp": "2026-10-08T12:00:11Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p1", "move": "kick", "hit": true, "damage": 20, "round": 1 } },
+    { "eventId": "bad-ctx-unknown-player", "timestamp": "2026-10-08T12:00:12Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "THROW", "data": { "targetId": "p9", "damage": 15, "round": 1 } },
+    { "eventId": "bad-ctx-recovery-without-knockdown", "timestamp": "2026-10-08T12:00:13Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "RECOVERY", "data": { "round": 1 } },
+    { "eventId": "xi-e04", "timestamp": "2026-10-08T12:00:15Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "METER_GAIN", "data": { "amount": 20, "round": 1 } },
+    { "eventId": "bad-ctx-not-enough-meter", "timestamp": "2026-10-08T12:00:16Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "SPECIAL_MOVE", "data": { "targetId": "p2", "name": "hadouken", "hit": true, "damage": 20, "meterCost": 50, "round": 1 } },
+    { "eventId": "bad-ctx-super-without-full-meter", "timestamp": "2026-10-08T12:00:17Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "SUPER_MOVE", "data": { "targetId": "p2", "hit": true, "damage": 50, "round": 1 } },
+
+    { "eventId": "xi-e05", "timestamp": "2026-10-08T12:00:20Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "COMBO", "data": { "targetId": "p2", "hits": 4, "damage": 60, "round": 1 } },
+    { "eventId": "xi-e06", "timestamp": "2026-10-08T12:00:22Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "KNOCKDOWN", "data": { "targetId": "p2", "round": 1 } },
+    { "eventId": "xi-e07", "timestamp": "2026-10-08T12:00:23Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "RECOVERY", "data": { "round": 1 } },
+    { "eventId": "bad-ctx-recovery-twice", "timestamp": "2026-10-08T12:00:24Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "RECOVERY", "data": { "round": 1 } },
+    { "eventId": "xi-e08", "timestamp": "2026-10-08T12:00:30Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ATTACK", "data": { "targetId": "p2", "move": "kick", "hit": true, "damage": 40, "round": 1 } },
+    { "eventId": "xi-e09", "timestamp": "2026-10-08T12:00:31Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p1", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 1, "remainingHealth": 100, "method": "ko" } },
+    { "eventId": "bad-ctx-round-won-twice", "timestamp": "2026-10-08T12:00:32Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "playerId": "p2", "type": "PLAYER_ACTION", "action": "ROUND_WON", "data": { "round": 1, "remainingHealth": 10, "method": "timeout" } },
+    { "eventId": "xi-e10", "timestamp": "2026-10-08T12:00:33Z", "gameId": "fighting", "gameVersion": "1.0", "matchId": "fight-997", "type": "MATCH_FINISHED", "data": {} }
+  ]
+}

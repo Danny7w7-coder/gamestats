@@ -14,15 +14,56 @@ Si algo de aquí cambia, cambia en `main` y ambos lo traen con `git pull origin 
 Decisiones:
 
 - El orden de los eventos se toma del `timestamp`; `minute` (football) es solo informativo.
-- `playerId` es obligatorio salvo en `MATCH_STARTED` y `MATCH_FINISHED`; `action` solo existe en `PLAYER_ACTION`.
-- Football: todo `GOAL` va precedido de un `SHOT` con `onTarget: true` del mismo jugador; no hay autogoles; con tarjeta roja el jugador no genera más eventos.
-- `winner`: racing → `playerId` (`ranking[0]`); football → `teamId`; empate o sin datos → `null`.
+- `playerId` es obligatorio salvo en `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED` y `MATCH_RESUMED`; `action` solo existe en `PLAYER_ACTION`.
+- Los nombres de acción son únicos entre todos los juegos (no hay dos juegos con una acción del mismo nombre).
+- Racing: un jugador con `DNF` no aparece en `MATCH_FINISHED.data.ranking`.
+- Football: todo `GOAL` va precedido de un `SHOT` con `onTarget: true` o de un `PENALTY_KICK` con `scored: true` del mismo jugador. `OWN_GOAL` lleva el `teamId` de quien lo hace y suma para el **otro** equipo. El que sale en una `SUBSTITUTION` (y el expulsado con roja) no genera más eventos.
+- Fighting: el medidor de cada jugador arranca en 0, sube con `METER_GAIN` (tope 100), baja con `SPECIAL_MOVE` (`meterCost`) y `SUPER_MOVE` (lo deja en 0), y se conserva entre rounds.
+- Tetris: en `marathon` cada jugador juega solo (puede haber varios); `GARBAGE_SENT`/`GARBAGE_RECEIVED` solo existen en `versus`.
+- `winner`: racing → `playerId` (`ranking[0]`); football → `teamId`; fighting → `playerId` con más `ROUND_WON`; tetris → `playerId` con más puntos (suma de `LINES_CLEARED.points`); empate o sin datos → `null`.
 - `score` y `teamStats` solo aparecen en football. `patterns[].playerId` es `null` en patrones de equipo.
+
+## Catálogo de eventos
+
+Los 8 tipos generales sirven para los cuatro juegos: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED`. Además, cada juego tiene 17 acciones (`type: "PLAYER_ACTION"`). El `data` exacto de cada una, con sus rangos y valores permitidos, está en `event.schema.json` (`$defs`).
+
+| Juego | `MATCH_STARTED.data` | Acciones |
+|---|---|---|
+| `racing` | `track`, `laps` | `LAP_COMPLETED`, `POSITION_CHANGED`, `PENALTY`, `SECTOR_COMPLETED`, `PIT_STOP`, `TIRE_CHANGE`, `OVERTAKE`, `COLLISION`, `TRACK_LIMITS`, `SPEED_TRAP`, `DNF`, `FUEL_LEVEL`, `DRS_ACTIVATED`, `SPIN`, `BLUE_FLAG`, `WARNING`, `PIT_LANE_SPEEDING` |
+| `football` | `homeTeam`, `awayTeam` (y `PLAYER_JOINED.data.teamId`) | `PASS`, `SHOT`, `GOAL`, `FOUL`, `SAVE`, `TACKLE`, `INTERCEPTION`, `CORNER`, `OFFSIDE`, `SUBSTITUTION`, `OWN_GOAL`, `PENALTY_KICK`, `FREE_KICK`, `THROW_IN`, `DRIBBLE`, `CLEARANCE`, `INJURY` |
+| `fighting` | `stage`, `rounds` (1, 3 o 5) (y `PLAYER_JOINED.data.character`) | `ATTACK`, `SPECIAL_MOVE`, `SUPER_MOVE`, `THROW`, `COMBO`, `COUNTER_HIT`, `BLOCK`, `PARRY`, `DODGE`, `KNOCKDOWN`, `RECOVERY`, `STUN`, `GUARD_BREAK`, `METER_GAIN`, `RAGE_MODE`, `TAUNT`, `ROUND_WON` |
+| `tetris` | `mode` (`marathon`/`versus`), `startLevel` (1–15) | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED`, `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR`, `COMBO_BROKEN`, `LEVEL_UP`, `SPEED_UP`, `STACK_HEIGHT`, `GARBAGE_SENT`, `GARBAGE_RECEIVED`, `TOP_OUT` |
+
+## Validaciones de contexto
+
+El schema valida cada evento por separado (tipos, rangos, enums, campos obligatorios, y en fighting que un golpe fallado tenga `damage: 0`). Las reglas de abajo dependen de **otros eventos de la partida**, así que no caben en un schema y las aplica Scala recorriendo los eventos en orden. Un evento que rompe una regla se descarta y **no cambia el estado** (por ejemplo, un `METER_GAIN` descartado no suma medidor).
+
+| Juego | Regla |
+|---|---|
+| Todos | `MATCH_RESUMED` solo después de un `MATCH_PAUSED`, y no se pausa dos veces seguidas. |
+| Todos | No hay `PLAYER_ACTION` mientras la partida está en pausa. |
+| Todos | Toda referencia a otro jugador (`targetId`, `overtakenId`, `otherId`, `lappedById`, `attackerId`, `fromId`, `assistId`, `inId`) es un jugador de la partida (`players`) distinto del que hace la acción. |
+| Racing | `lap` ≤ `MATCH_STARTED.data.laps`. |
+| Racing | `POSITION_CHANGED`: `from` ≠ `to`. |
+| Racing | `TIRE_CHANGE` solo si ese jugador hizo un `PIT_STOP` en esa misma vuelta. |
+| Racing | `FUEL_LEVEL` no sube respecto a la lectura anterior del jugador, salvo que haya un `PIT_STOP` entre las dos. |
+| Racing | `PIT_LANE_SPEEDING`: `speedKmh` > `limitKmh`. |
+| Racing | Después de un `DNF` el jugador no tiene más eventos. |
+| Football | `SUBSTITUTION`: el que entra (`inId`) no hizo ninguna acción antes. |
+| Football | El que sale en una `SUBSTITUTION` o recibe roja no tiene más eventos. |
+| Football | `PENALTY_KICK` con `scored: true`: la siguiente acción de ese jugador es su `GOAL` (si no, se descarta el penal). |
+| Fighting | `round` ≤ `MATCH_STARTED.data.rounds`. |
+| Fighting | `RECOVERY` solo después de un `KNOCKDOWN` contra ese jugador en ese round, una vez por derribo. |
+| Fighting | `SPECIAL_MOVE` solo si el medidor alcanza para `meterCost`; `SUPER_MOVE` solo con el medidor en 100. |
+| Fighting | Un solo `ROUND_WON` por round. |
+| Tetris | `LEVEL_UP`: el nivel nuevo es mayor que el actual del jugador (al inicio, `startLevel`). |
+| Tetris | `GARBAGE_SENT` / `GARBAGE_RECEIVED` solo en modo `versus`. |
+| Tetris | Después de un `TOP_OUT` el jugador no tiene más eventos. |
 
 ## Quién valida qué
 
 - **Go** valida cada evento al recibirlo y rechaza solo ese evento: campos obligatorios, `timestamp` RFC3339, `type` conocido, `action` solo en `PLAYER_ACTION`, y `action` dentro del catálogo del juego (`ingestion-go/internal/validation/catalog.go`). Go **no** revisa `data`. Por eso, aunque `event.schema.json` acepta cualquier `action`, en la práctica a Scala solo llegan acciones del catálogo.
-- **Scala** rechaza el lote completo (`400`) solo por errores del lote: encabezado incompleto, `events` vacío, un evento sin `eventId`/`timestamp`/`type` válidos o de otra partida/juego, o `gameId` sin analyzer. Si una acción conocida trae `data` mal formada, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual. Una acción desconocida se cuenta en `eventsByAction` y no afecta el resto.
+- **Scala** rechaza el lote completo (`400`) solo por errores del lote: encabezado incompleto, `events` vacío, un evento sin `eventId`/`timestamp`/`type` válidos o de otra partida/juego, o `gameId` sin analyzer. Si una acción conocida trae `data` mal formada o rompe una validación de contexto, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual. Una acción desconocida se cuenta en `eventsByAction` y no afecta el resto.
 - Ante un `4xx` Go no reintenta (la partida queda como `error_envio`); ante `5xx` o timeout reintenta 3 veces (1, 2 y 4 s). Scala solo responde `500` si no puede guardar el resultado.
 
 ## Fixtures
@@ -31,10 +72,22 @@ Decisiones:
 |---|---|---|
 | `racing_match_ok.json` | race-001 | p1 gana (vueltas 82000/81500/80900 ms, peor posición 2 → **sin** COMEBACK). p3 tiene un `PENALTY` de 5 s. |
 | `comeback_case.json` | race-002 | p3 va 3° → 2° → 1° y gana → **COMEBACK**. |
+| `racing_full_ok.json` | race-003 | Las 17 acciones de racing y una pausa (bandera roja). p2 gana sin entrar a pits, sin choques ni penalizaciones. p1 entra a pits en la vuelta 2 (sube el combustible), excede la velocidad en el pit lane y recibe 5 s. p3 choca con p1, hace un trompo y abandona (`DNF`, no está en el ranking). Ranking `[p2, p1]`. |
 | `football_match_ok.json` | foot-001 | A gana 2-1 (goles A, A, B → **sin** COMEBACK). p2: 3 pases, 2 exitosos. p4: 0 tiros. Un gol sin asistencia. |
 | `football_comeback.json` | foot-002 | A gana 2-1 remontando (goles B, A, A → **COMEBACK**). p4 recibe roja y no vuelve a aparecer. |
+| `football_full_ok.json` | foot-003 | Las 17 acciones de football y el entretiempo como pausa. A gana 3-0: autogol de p5 (B), penal anotado por p2 y gol de p7 (entró por p3 en el 60') con asistencia de p2. B falla un penal y p1 (portero) hace 2 atajadas → A con la valla invicta. |
+| `fighting_match_ok.json` | fight-001 | Mejor de 3. p1 gana 2-0: round 1 sin recibir daño (vida 100, `SUPER_MOVE` con el medidor lleno) y round 2 por KO con vida 40. 16 de las 17 acciones (falta `RAGE_MODE`). |
+| `fighting_comeback.json` | fight-002 | Mejor de 3. p3 gana el round 1 por tiempo (vida 60); p4 gana los rounds 2 y 3 → **remontada**. En el round 3 p4 entra en `RAGE_MODE` (vida 25) y gana con un `SUPER_MOVE` usando medidor guardado del round 2. |
+| `tetris_versus_ok.json` | tetris-001 | Versus. p1 hace dos tetris seguidos (back-to-back) y un T-spin doble, manda 12 líneas de basura y sube al nivel 2; p2 llega al tope (`TOP_OUT`). Puntos: p1 3200, p2 200. 16 de las 17 acciones (falta `ALL_CLEAR`). |
+| `tetris_marathon_ok.json` | tetris-002 | Marathon de un jugador (p3) desde el nivel 5, con pausa. 3 T-spins (0, 1 y 2 líneas), un tetris que deja el tablero vacío (`ALL_CLEAR`), niveles 6 y 7, termina en `TOP_OUT`. |
+| `racing_invalid_events.json` | race-997 | 9 eventos con `data` inválida + 10 que rompen validaciones de contexto. |
+| `football_invalid_events.json` | foot-997 | 5 + 7. |
+| `fighting_invalid_events.json` | fight-997 | 5 + 8. |
+| `tetris_invalid_events.json` | tetris-997 | 7 + 4. |
 | `invalid_missing_matchid.json` | — | Lote sin `matchId` → `400`. |
 | `invalid_bad_timestamp.json` | race-998 | Un `timestamp` que no parsea → `400`. |
+
+En los `*_invalid_events.json`, el `eventId` dice qué se espera: todo evento `bad-data-*` falla el schema, todo evento `bad-ctx-*` rompe una validación de contexto, y **solo esos** se descartan. El resto de la partida es válido y se analiza normal. Un test puede comprobarlo así: los descartados de Scala son exactamente los `eventId` que empiezan con `bad-`.
 
 Probar contra Scala:
 

@@ -1,0 +1,46 @@
+{
+  "matchId": "tetris-002",
+  "gameId": "tetris",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-07T20:00:00Z",
+  "finishedAt": "2026-10-07T20:01:12Z",
+  "players": ["p3"],
+  "events": [
+    { "eventId": "t2-e01", "timestamp": "2026-10-07T20:00:00Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "type": "MATCH_STARTED", "data": { "mode": "marathon", "startLevel": 5 } },
+    { "eventId": "t2-e02", "timestamp": "2026-10-07T20:00:01Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_JOINED", "data": {} },
+
+    { "eventId": "t2-e03", "timestamp": "2026-10-07T20:00:05Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_SPAWNED", "data": { "piece": "T" } },
+    { "eventId": "t2-e04", "timestamp": "2026-10-07T20:00:06Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_ROTATED", "data": { "direction": "cw" } },
+    { "eventId": "t2-e05", "timestamp": "2026-10-07T20:00:07Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_PLACED", "data": { "piece": "T", "hardDrop": false } },
+    { "eventId": "t2-e06", "timestamp": "2026-10-07T20:00:07.100Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "T_SPIN", "data": { "lines": 0 } },
+    { "eventId": "t2-e07", "timestamp": "2026-10-07T20:00:10Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_SPAWNED", "data": { "piece": "T" } },
+    { "eventId": "t2-e08", "timestamp": "2026-10-07T20:00:11Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_ROTATED", "data": { "direction": "cw" } },
+    { "eventId": "t2-e09", "timestamp": "2026-10-07T20:00:11.500Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "SOFT_DROP", "data": { "cells": 2 } },
+    { "eventId": "t2-e10", "timestamp": "2026-10-07T20:00:12Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_PLACED", "data": { "piece": "T", "hardDrop": false } },
+    { "eventId": "t2-e11", "timestamp": "2026-10-07T20:00:12.100Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "T_SPIN", "data": { "lines": 1 } },
+    { "eventId": "t2-e12", "timestamp": "2026-10-07T20:00:12.200Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "LINES_CLEARED", "data": { "lines": 1, "points": 4000, "combo": 0 } },
+    { "eventId": "t2-e13", "timestamp": "2026-10-07T20:00:15Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "LEVEL_UP", "data": { "level": 6 } },
+    { "eventId": "t2-e14", "timestamp": "2026-10-07T20:00:15Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "SPEED_UP", "data": { "gravity": 2.5 } },
+
+    { "eventId": "t2-e15", "timestamp": "2026-10-07T20:00:20Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "type": "MATCH_PAUSED", "data": { "reason": "player_request" } },
+    { "eventId": "t2-e16", "timestamp": "2026-10-07T20:00:50Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "type": "MATCH_RESUMED", "data": {} },
+
+    { "eventId": "t2-e17", "timestamp": "2026-10-07T20:00:55Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_SPAWNED", "data": { "piece": "I" } },
+    { "eventId": "t2-e18", "timestamp": "2026-10-07T20:00:56Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_MOVED", "data": { "direction": "left" } },
+    { "eventId": "t2-e19", "timestamp": "2026-10-07T20:00:57Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "HARD_DROP", "data": { "cells": 16 } },
+    { "eventId": "t2-e20", "timestamp": "2026-10-07T20:00:57Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_PLACED", "data": { "piece": "I", "hardDrop": true } },
+    { "eventId": "t2-e21", "timestamp": "2026-10-07T20:00:57.100Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "LINES_CLEARED", "data": { "lines": 4, "points": 4800, "combo": 0 } },
+    { "eventId": "t2-e22", "timestamp": "2026-10-07T20:00:57.200Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "ALL_CLEAR", "data": { "lines": 4 } },
+    { "eventId": "t2-e23", "timestamp": "2026-10-07T20:01:00Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_SPAWNED", "data": { "piece": "T" } },
+    { "eventId": "t2-e24", "timestamp": "2026-10-07T20:01:01Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_ROTATED", "data": { "direction": "ccw" } },
+    { "eventId": "t2-e25", "timestamp": "2026-10-07T20:01:02Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "PIECE_PLACED", "data": { "piece": "T", "hardDrop": false } },
+    { "eventId": "t2-e26", "timestamp": "2026-10-07T20:01:02.100Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "T_SPIN", "data": { "lines": 2 } },
+    { "eventId": "t2-e27", "timestamp": "2026-10-07T20:01:02.200Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "LINES_CLEARED", "data": { "lines": 2, "points": 7200, "combo": 1 } },
+    { "eventId": "t2-e28", "timestamp": "2026-10-07T20:01:05Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "LEVEL_UP", "data": { "level": 7 } },
+    { "eventId": "t2-e29", "timestamp": "2026-10-07T20:01:05Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "SPEED_UP", "data": { "gravity": 3.5 } },
+    { "eventId": "t2-e30", "timestamp": "2026-10-07T20:01:10Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "STACK_HEIGHT", "data": { "rows": 20 } },
+    { "eventId": "t2-e31", "timestamp": "2026-10-07T20:01:11Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "playerId": "p3", "type": "PLAYER_ACTION", "action": "TOP_OUT", "data": {} },
+
+    { "eventId": "t2-e32", "timestamp": "2026-10-07T20:01:12Z", "gameId": "tetris", "gameVersion": "1.0", "matchId": "tetris-002", "type": "MATCH_FINISHED", "data": {} }
+  ]
+}

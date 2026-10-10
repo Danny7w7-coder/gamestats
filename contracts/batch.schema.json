@@ -7,7 +7,7 @@
   "required": ["matchId", "gameId", "gameVersion", "startedAt", "finishedAt", "players", "events"],
   "properties": {
     "matchId":     { "type": "string", "minLength": 1 },
-    "gameId":      { "enum": ["racing", "football"] },
+    "gameId":      { "enum": ["racing", "football", "fighting", "tetris"] },
     "gameVersion": { "type": "string", "minLength": 1 },
     "startedAt":   { "type": "string", "format": "date-time" },
     "finishedAt":  { "type": "string", "format": "date-time" },
