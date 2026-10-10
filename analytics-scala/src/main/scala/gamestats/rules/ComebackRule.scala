@@ -1,7 +1,7 @@
 package gamestats.rules
 
 import gamestats.model.*
-import gamestats.stats.{FootballAnalyzer, RacingAnalyzer}
+import gamestats.stats.{FightingAnalyzer, FootballAnalyzer, RacingAnalyzer}
 
 /** COMEBACK en racing: el ganador estuvo en 3° lugar o peor en algún momento. */
 object RacingComebackRule extends Rule:
@@ -37,6 +37,19 @@ object RacingComebackRule extends Rule:
       }
       .groupMap(_._1)(_._2) // groupMap: agrupa por jugador y se queda solo con la posición
 
+/** COMEBACK en fighting: el que ganó la pelea había perdido el primer round. */
+object FightingComebackRule extends Rule:
+
+  val name: String = "COMEBACK"
+
+  def detect(batch: MatchBatch): List[Pattern] =
+    // for sobre Option: si falta el ganador o el round 1, no hay patrón.
+    (for
+      winner      <- FightingAnalyzer.winner(batch)
+      (_, first)  <- FightingAnalyzer.roundWinners(batch).find(_._1 == 1)
+      if first != winner
+    yield Pattern(name, Some(winner), s"$winner perdió el primer round y ganó la pelea")).toList
+
 /** COMEBACK en football: el equipo que ganó estuvo perdiendo en algún momento. */
 object FootballComebackRule extends Rule:
 
@@ -56,13 +69,13 @@ object FootballComebackRule extends Rule:
       }
       .toList
 
-  /** foldLeft sobre los GOAL en orden de timestamp, llevando el marcador y el
-    * conjunto de equipos que alguna vez estuvieron abajo.
+  /** foldLeft sobre los goles en orden de timestamp (incluidos los autogoles,
+    * que suman para el rival), llevando el marcador y el conjunto de equipos que
+    * alguna vez estuvieron abajo.
     */
   def replayGoals(batch: MatchBatch): Progress =
     val start = Progress(FootballAnalyzer.teams(batch).map(_ -> 0).toMap, Set.empty)
-    val goals = batch.events.flatMap(_.action).collect { case Goal(team, _, _) => team }
-    goals.foldLeft(start) { (acc, team) =>
+    FootballAnalyzer.goalsInOrder(batch).foldLeft(start) { (acc, team) =>
       val score  = acc.score.updated(team, acc.score.getOrElse(team, 0) + 1)
       // Un equipo va perdiendo si algún otro tiene más goles que él.
       val behind = score.keySet.filter(t => score.exists((other, g) => other != t && g > score(t)))

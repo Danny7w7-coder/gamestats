@@ -170,7 +170,7 @@ En Windows (PowerShell) se usa `curl.exe` en lugar de `curl`.
 | ingestion | `PORT` | `8080` | Puerto HTTP |
 | ingestion | `SCALA_URL` | `http://localhost:8081` | Dirección del servicio de análisis |
 | ingestion | `WORKERS` | `4` | Cuántos envíos a Scala en paralelo |
-| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala *(en desarrollo)* |
+| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala |
 
 ## Endpoints
 
@@ -180,7 +180,7 @@ En Windows (PowerShell) se usa `curl.exe` en lugar de `curl`.
 |---|---|---|
 | `GET` | `/health` | `{"status":"ok"}` |
 | `POST` | `/events` | Recibe un evento (`{...}`) o varios (`[...]`); responde cuántos aceptó y el motivo de cada rechazo |
-| `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada` o `error_envio` (`abandonada` cuando esté listo `IDLE_TIMEOUT`) |
+| `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada`, `error_envio` o `abandonada` (sin eventos durante `IDLE_TIMEOUT`) |
 
 **Análisis (Scala, puerto 8081)**
 
@@ -228,4 +228,5 @@ Cada una también se publica con el hash del commit como etiqueta. Como el repos
 ## Documentación adicional
 
 - [`contracts/README.md`](contracts/README.md): formato de eventos y resultados, fixtures y quién valida qué.
+- [`docs/ingestion-go.md`](docs/ingestion-go.md): detalle del módulo de ingestión (validación, concurrencia, simulador y cómo agregar un juego).
 - [`docs/imperativo-vs-funcional.md`](docs/imperativo-vs-funcional.md): comparación entre el paradigma imperativo (Go) y el funcional (Scala) a partir de lo que se implementó.

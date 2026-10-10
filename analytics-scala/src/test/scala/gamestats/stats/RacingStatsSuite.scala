@@ -35,7 +35,8 @@ class RacingStatsSuite extends munit.FunSuite:
     val withGhost = batch.copy(players = batch.players :+ "p9")
     val p9 = metricsOf(RacingAnalyzer.analyze(withGhost), "p9")
     assertEquals(p9.values.toSet, Set(0.0))
-    assertEquals(p9.keySet, Set("bestLapMs", "avgLapMs", "consistency", "penaltySeconds", "effectiveTimeMs"))
+    assertEquals(p9.keySet, Set("bestLapMs", "avgLapMs", "consistency", "penaltySeconds", "effectiveTimeMs",
+      "overtakes", "itemsPicked", "itemsUsed", "boostsUsed", "collisions"))
 
   test("sin MATCH_FINISHED no hay ganador"):
     val unfinished = batch.copy(events = batch.events.filterNot(_.eventType == EventType.MatchFinished))

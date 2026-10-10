@@ -20,6 +20,12 @@ object GenericStats:
       score = None
     )
 
+  /** Cuántas acciones cumplen el patrón. Recibe una función parcial
+    * (`{ case _: Overtake => }`) y cuenta los eventos en los que está definida.
+    */
+  def countOf(pattern: PartialFunction[GameAction, Any]): List[Event] => Double =
+    _.flatMap(_.action).count(pattern.isDefinedAt).toDouble
+
   /** Cuántas veces ocurrió cada acción (incluidas las desconocidas). */
   def eventsByAction(events: List[Event]): Map[String, Int] =
     events

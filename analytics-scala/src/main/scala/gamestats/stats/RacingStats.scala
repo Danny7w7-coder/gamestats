@@ -1,14 +1,19 @@
 package gamestats.stats
 
 import gamestats.model.*
-import gamestats.rules.{RacingComebackRule, Rule}
+import gamestats.rules.{CleanRaceRule, ItemMasterRule, RacingComebackRule, Rule}
+import gamestats.validation.{ContextCheck, RacingCheck}
 
-/** Análisis de carreras. Todo puro: recibe el lote y devuelve el resultado. */
+/** Análisis de carreras arcade (por vueltas, posiciones y objetos). Todo puro:
+  * recibe el lote y devuelve el resultado.
+  */
 object RacingAnalyzer extends GameAnalyzer:
 
   val gameId: String = "racing"
 
-  override def rules: List[Rule] = List(RacingComebackRule)
+  override def rules: List[Rule] = List(RacingComebackRule, CleanRaceRule, ItemMasterRule)
+
+  override def context: ContextCheck = RacingCheck
 
   def analyze(batch: MatchBatch): MatchAnalysis =
     // groupBy por jugador; collect descarta el grupo de eventos sin jugador
@@ -68,13 +73,27 @@ object RacingAnalyzer extends GameAnalyzer:
   val effectiveTimeMs: List[Event] => Double =
     events => (lapTimes(events).sum + penaltySeconds(events) * 1000L).toDouble
 
+  import GenericStats.countOf
+
+  val overtakes: List[Event] => Double   = countOf { case _: Overtake => }
+  val itemsPicked: List[Event] => Double = countOf { case _: ItemPickup => }
+  val itemsUsed: List[Event] => Double   = countOf { case _: ItemUsed => }
+  val boostsUsed: List[Event] => Double  = countOf { case ItemUsed(_, Item.Boost, _) => }
+  /** Choques que provocó el jugador (es el que manda el COLLISION). */
+  val collisions: List[Event] => Double  = countOf { case _: Collision => }
+
   def metrics(events: List[Event]): Map[String, Double] =
     Map(
       "bestLapMs"       -> bestLapMs(events),
       "avgLapMs"        -> avgLapMs(events),
       "consistency"     -> consistency(events),
       "penaltySeconds"  -> penaltySeconds(events).toDouble,
-      "effectiveTimeMs" -> effectiveTimeMs(events)
+      "effectiveTimeMs" -> effectiveTimeMs(events),
+      "overtakes"       -> overtakes(events),
+      "itemsPicked"     -> itemsPicked(events),
+      "itemsUsed"       -> itemsUsed(events),
+      "boostsUsed"      -> boostsUsed(events),
+      "collisions"      -> collisions(events)
     )
 
   // ---------------------------------------------------------------------------

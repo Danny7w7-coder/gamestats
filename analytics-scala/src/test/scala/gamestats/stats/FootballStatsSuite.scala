@@ -48,8 +48,8 @@ class FootballStatsSuite extends munit.FunSuite:
     assertEquals(metricsOf(analysis, "p4")("assists"), 1.0)
 
   test("teamStats: goles y faltas por equipo"):
-    assertEquals(teamOf(analysis, "A"), Map("goals" -> 2.0, "fouls" -> 2.0))
-    assertEquals(teamOf(analysis, "B"), Map("goals" -> 1.0, "fouls" -> 1.0))
+    assertEquals(teamOf(analysis, "A"), Map("goals" -> 2.0, "fouls" -> 2.0, "corners" -> 0.0))
+    assertEquals(teamOf(analysis, "B"), Map("goals" -> 1.0, "fouls" -> 1.0, "corners" -> 0.0))
     assertEquals(analysis.matchStats.eventsByAction.get("FOUL"), Some(3)) // total de faltas
 
   test("partida 1-1 -> winner = None"):

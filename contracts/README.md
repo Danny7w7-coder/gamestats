@@ -50,7 +50,7 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 | Racing | `ITEM_USED` solo si el jugador tiene en la mano ese mismo objeto. |
 | Racing | `RESPAWN` solo después de un `COLLISION` o `SPIN` de ese jugador en esa vuelta, una vez por incidente. |
 | Racing | Después de un `DNF` el jugador no tiene más eventos. |
-| Football | Máximo 6 jugadores por equipo: un `PLAYER_JOINED` que haría el séptimo se descarta, y también todos los eventos de ese jugador. |
+| Football | Solo juegan los que entraron a un equipo (`PLAYER_JOINED` con `teamId`), con máximo 6 por equipo: el `PLAYER_JOINED` que haría el séptimo se descarta, y con él todos los eventos de ese jugador. |
 | Football | El que recibe roja no tiene más eventos. |
 | Fighting | `round` ≤ `MATCH_STARTED.data.rounds`. |
 | Fighting | `COMBO_BREAKER` solo después de un `COMBO` del rival (`attackerId`) contra ese jugador en ese round, una vez por combo. |

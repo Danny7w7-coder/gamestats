@@ -90,6 +90,7 @@ object Codecs:
 
   /** Nombre de acción + `data` -> GameAction. Para agregar un juego nuevo,
     * se agregan sus casos aquí; cualquier otro nombre queda como UnknownAction.
+    * Además de los tipos se revisan los rangos y valores de event.schema.json.
     */
   def parseAction(name: String, data: ujson.Value): Result[GameAction] =
     val f   = data.objOpt.map(_.toMap).getOrElse(Map.empty[String, ujson.Value])
@@ -97,29 +98,125 @@ object Codecs:
     name match
       // Racing
       case "LAP_COMPLETED" =>
-        ctx(for lap <- int(f, "lap"); t <- long(f, "lapTimeMs"); pos <- int(f, "position")
+        ctx(for lap <- intMin(f, "lap", 1); t <- longMin(f, "lapTimeMs", 1); pos <- intMin(f, "position", 1)
             yield LapCompleted(lap, t, pos))
       case "POSITION_CHANGED" =>
-        ctx(for from <- int(f, "from"); to <- int(f, "to"); lap <- int(f, "lap")
+        ctx(for from <- intMin(f, "from", 1); to <- intMin(f, "to", 1); lap <- intMin(f, "lap", 1)
             yield PositionChanged(from, to, lap))
       case "PENALTY" =>
-        ctx(for s <- int(f, "seconds"); reason <- str(f, "reason")
+        ctx(for s <- intMin(f, "seconds", 0); reason <- str(f, "reason")
             yield Penalty(s, reason))
-      // Football
+      case "OVERTAKE" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "overtakenId")
+            yield Overtake(lap, other))
+      case "LAPPED" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "lappedId")
+            yield Lapped(lap, other))
+      case "ITEM_PICKUP" =>
+        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
+            yield ItemPickup(lap, item))
+      case "ITEM_USED" =>
+        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
+                ms  <- optionalField(f, "durationMs")(_ => longMin(f, "durationMs", 1))
+                _   <- check(item != Item.Boost || ms.isDefined, "el boost necesita 'durationMs'")
+            yield ItemUsed(lap, item, ms))
+      case "DRIFT" =>
+        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1); ms <- longMin(f, "durationMs", 1)
+            yield Drift(lap, corner, ms))
+      case "COLLISION" =>
+        ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "otherId"); dmg <- intIn(f, "damage", 0, 100)
+            yield Collision(lap, other, dmg))
+      case "SPIN" =>
+        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1)
+            yield Spin(lap, corner))
+      case "RESPAWN" =>
+        ctx(for lap <- intMin(f, "lap", 1); pos <- intMin(f, "position", 1)
+            yield Respawn(lap, pos))
+      case "DNF" =>
+        ctx(for lap <- intMin(f, "lap", 1); reason <- oneOf(f, "reason", DnfReason.values.map(r => r.key -> r).toMap)
+            yield Dnf(lap, reason))
+      // Football (minute: 0..130 en todas las acciones)
       case "PASS" =>
         ctx(for team <- str(f, "teamId"); target <- str(f, "targetId"); ok <- bool(f, "success")
-                dist <- double(f, "distance"); min <- int(f, "minute")
+                dist <- double(f, "distance").filterOrElse(_ >= 0, "'distance' debe ser ≥ 0"); min <- minute(f)
             yield Pass(team, target, ok, dist, min))
       case "SHOT" =>
-        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- int(f, "minute")
+        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
             yield Shot(team, onTarget, min))
+      case "POWER_SHOT" =>
+        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
+            yield PowerShot(team, onTarget, min))
       case "GOAL" =>
-        ctx(for team <- str(f, "teamId"); assist <- optStr(f, "assistId"); min <- int(f, "minute")
+        ctx(for team <- str(f, "teamId"); assist <- optStr(f, "assistId"); min <- minute(f)
             yield Goal(team, assist, min))
+      case "OWN_GOAL" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield OwnGoal(team, min))
       case "FOUL" =>
         ctx(for team <- str(f, "teamId"); card <- str(f, "card").flatMap(parseCard)
-                min <- int(f, "minute"); target <- optStr(f, "targetId")
+                min <- minute(f); target <- optStr(f, "targetId")
             yield Foul(team, card, min, target))
+      case "SAVE" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Save(team, min))
+      case "TACKLE" =>
+        ctx(for team <- str(f, "teamId"); target <- nonEmptyStr(f, "targetId"); ok <- bool(f, "success"); min <- minute(f)
+            yield Tackle(team, target, ok, min))
+      case "INTERCEPTION" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Interception(team, min))
+      case "DRIBBLE" =>
+        ctx(for team <- str(f, "teamId"); ok <- bool(f, "success"); min <- minute(f) yield Dribble(team, ok, min))
+      case "CORNER" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Corner(team, min))
+      // Fighting (round: 1..5; damage: 0..100, y 0 si el golpe falla)
+      case "ATTACK" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); move <- oneOf(f, "move", Move.values.map(m => m.key -> m).toMap)
+                hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
+            yield Attack(target, move, hit, dmg, r))
+      case "SPECIAL_MOVE" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name")
+                hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
+            yield SpecialMove(target, name, hit, dmg, r))
+      case "COMBO" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); hits <- intMin(f, "hits", 2)
+                dmg <- intIn(f, "damage", 1, 100); r <- round(f)
+            yield Combo(target, hits, dmg, r))
+      case "THROW" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); dmg <- intIn(f, "damage", 1, 100); r <- round(f)
+            yield Throw(target, dmg, r))
+      case "BLOCK" =>
+        ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield Block(attacker, r))
+      case "COMBO_BREAKER" =>
+        ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield ComboBreaker(attacker, r))
+      case "KNOCKDOWN" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); r <- round(f) yield Knockdown(target, r))
+      case "FATAL_BLOW" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); hit <- bool(f, "hit"); dmg <- strike(f, hit)
+                health <- intIn(f, "health", 1, 30); r <- round(f)
+            yield FatalBlow(target, hit, dmg, health, r))
+      case "ROUND_WON" =>
+        ctx(for r <- round(f); health <- intIn(f, "remainingHealth", 1, 100)
+                method <- oneOf(f, "method", WinMethod.values.map(m => m.key -> m).toMap)
+            yield RoundWon(r, health, method))
+      case "FATALITY" =>
+        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name") yield Fatality(target, name))
+      // Tetris
+      case "PIECE_SPAWNED" => ctx(piece(f, "piece").map(PieceSpawned(_)))
+      case "PIECE_MOVED" =>
+        ctx(oneOf(f, "direction", Side.values.map(s => s.key -> s).toMap).map(PieceMoved(_)))
+      case "PIECE_ROTATED" =>
+        ctx(oneOf(f, "direction", Rotation.values.map(r => r.key -> r).toMap).map(PieceRotated(_)))
+      case "SOFT_DROP" => ctx(intIn(f, "cells", 1, 20).map(SoftDrop(_)))
+      case "HARD_DROP" => ctx(intIn(f, "cells", 0, 20).map(HardDrop(_)))
+      case "HOLD"      => ctx(piece(f, "piece").map(Hold(_)))
+      case "PIECE_PLACED" =>
+        ctx(for p <- piece(f, "piece"); hard <- bool(f, "hardDrop") yield PiecePlaced(p, hard))
+      case "LINES_CLEARED" =>
+        ctx(for lines <- intIn(f, "lines", 1, 4); points <- intMin(f, "points", 0); combo <- intMin(f, "combo", 0)
+            yield LinesCleared(lines, points, combo))
+      case "T_SPIN"       => ctx(intIn(f, "lines", 0, 3).map(TSpin(_)))
+      case "ALL_CLEAR"    => ctx(intIn(f, "lines", 1, 4).map(AllClear(_)))
+      case "LEVEL_UP"     => ctx(intIn(f, "level", 2, 30).map(LevelUp(_)))
+      case "STACK_HEIGHT" => ctx(intIn(f, "rows", 0, 20).map(StackHeight(_)))
+      case "TOP_OUT"      => Right(TopOut)
       // Acción que ningún analyzer conoce: no es error, se conserva.
       case other =>
         Right(UnknownAction(other, data))
@@ -245,6 +342,8 @@ object Codecs:
   private def parseEventType(s: String): Result[EventType] = s match
     case "MATCH_STARTED"       => Right(EventType.MatchStarted)
     case "MATCH_FINISHED"      => Right(EventType.MatchFinished)
+    case "MATCH_PAUSED"        => Right(EventType.MatchPaused)
+    case "MATCH_RESUMED"       => Right(EventType.MatchResumed)
     case "PLAYER_JOINED"       => Right(EventType.PlayerJoined)
     case "PLAYER_LEFT"         => Right(EventType.PlayerLeft)
     case "PLAYER_DISCONNECTED" => Right(EventType.PlayerDisconnected)
@@ -305,6 +404,36 @@ object Codecs:
 
   private def int(f: Fields, key: String): Result[Int] =
     long(f, key).filterOrElse(_.isValidInt, s"'$key' fuera de rango").map(_.toInt)
+
+  // Rangos del schema (minimum / maximum). filterOrElse convierte un valor fuera
+  // de rango en Left sin cambiar el tipo del resultado.
+  private def intMin(f: Fields, key: String, min: Int): Result[Int] =
+    int(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
+
+  private def intIn(f: Fields, key: String, min: Int, max: Int): Result[Int] =
+    int(f, key).filterOrElse(n => n >= min && n <= max, s"'$key' debe estar entre $min y $max")
+
+  private def longMin(f: Fields, key: String, min: Long): Result[Long] =
+    long(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
+
+  /** Minuto de football: informativo, pero dentro del rango del schema. */
+  private def minute(f: Fields): Result[Int] = intIn(f, "minute", 0, 130)
+
+  /** Round de fighting (1 a 5; contra el máximo de la pelea lo revisa FightingCheck). */
+  private def round(f: Fields): Result[Int] = intIn(f, "round", 1, 5)
+
+  /** Daño de un golpe que puede fallar: 0..100, y exactamente 0 si no conectó. */
+  private def strike(f: Fields, hit: Boolean): Result[Int] =
+    intIn(f, "damage", 0, 100).filterOrElse(d => hit || d == 0, "un golpe que falla no hace daño ('damage' debe ser 0)")
+
+  private def piece(f: Fields, key: String): Result[Piece] =
+    oneOf(f, key, Piece.values.map(p => p.key -> p).toMap)
+
+  /** Valor dentro de una lista cerrada (los `enum` del schema). */
+  private def oneOf[A](f: Fields, key: String, options: Map[String, A]): Result[A] =
+    str(f, key).flatMap(s =>
+      options.get(s).toRight(s"'$key' debe ser ${options.keys.toList.sorted.mkString("|")}, llegó '$s'")
+    )
 
   private def array(f: Fields, key: String): Result[List[ujson.Value]] =
     get(f, key).flatMap(_.arrOpt.map(_.toList).toRight(s"'$key' debe ser un arreglo"))

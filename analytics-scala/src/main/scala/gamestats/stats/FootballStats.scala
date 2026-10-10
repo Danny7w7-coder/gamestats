@@ -1,14 +1,19 @@
 package gamestats.stats
 
 import gamestats.model.*
-import gamestats.rules.{FootballComebackRule, HatTrickRule, Rule}
+import gamestats.rules.{CleanSheetRule, FootballComebackRule, HatTrickRule, Rule}
+import gamestats.validation.{ContextCheck, FootballCheck}
 
-/** Análisis de fútbol. Todo puro: recibe el lote y devuelve el resultado. */
+/** Análisis de fútbol 6 vs 6 estilo arcade. Todo puro: recibe el lote y
+  * devuelve el resultado.
+  */
 object FootballAnalyzer extends GameAnalyzer:
 
   val gameId: String = "football"
 
-  override def rules: List[Rule] = List(FootballComebackRule, HatTrickRule)
+  override def rules: List[Rule] = List(FootballComebackRule, HatTrickRule, CleanSheetRule)
+
+  override def context: ContextCheck = FootballCheck
 
   def analyze(batch: MatchBatch): MatchAnalysis =
     val all = actions(batch.events)
@@ -22,9 +27,14 @@ object FootballAnalyzer extends GameAnalyzer:
     val playerStats = batch.players.map { p =>
       PlayerStats(p, playerMetrics(byPlayer.getOrElse(p, Nil), assists.getOrElse(p, 0)))
     }
-    val fouls = countOccurrences(all.collect { case Foul(team, _, _, _) => team })
+    val fouls   = countOccurrences(all.collect { case Foul(team, _, _, _) => team })
+    val corners = countOccurrences(all.collect { case Corner(team, _) => team })
     val teamStats = teams(batch).map { t =>
-      TeamStats(t, Map("goals" -> finalScore.getOrElse(t, 0).toDouble, "fouls" -> fouls.getOrElse(t, 0).toDouble))
+      TeamStats(t, Map(
+        "goals"   -> finalScore.getOrElse(t, 0).toDouble,
+        "fouls"   -> fouls.getOrElse(t, 0).toDouble,
+        "corners" -> corners.getOrElse(t, 0).toDouble
+      ))
     }
 
     MatchAnalysis(
@@ -48,14 +58,23 @@ object FootballAnalyzer extends GameAnalyzer:
 
   // collect filtra el tipo de acción y extrae lo que interesa en un solo paso.
   val goals: List[Event] => Int  = e => actions(e).collect { case g: Goal => g }.size
-  val shots: List[Event] => Int  = e => actions(e).collect { case s: Shot => s }.size
+  /** Tiros normales y potentes: los dos pueden terminar en gol. */
+  val shots: List[Event] => Int  = e => actions(e).collect { case s: Shot => s; case s: PowerShot => s }.size
+  val powerShots: List[Event] => Int = e => actions(e).collect { case s: PowerShot => s }.size
   val passes: List[Event] => List[Pass] = e => actions(e).collect { case p: Pass => p }
+  val saves: List[Event] => Int  = e => actions(e).collect { case s: Save => s }.size
+
+  /** Balones recuperados: entradas exitosas más intercepciones. */
+  val recoveries: List[Event] => Int =
+    e => actions(e).collect { case Tackle(_, _, true, _) => 1; case _: Interception => 1 }.size
+
+  val dribblesWon: List[Event] => Int = e => actions(e).collect { case Dribble(_, true, _) => 1 }.size
 
   /** Pases exitosos / pases totales. */
   val passAccuracy: List[Event] => Double =
     passes andThen (ps => ratio(ps.count(_.success), ps.size))
 
-  /** Combina dos tipos de evento: GOAL / SHOT (todo gol va precedido de su tiro). */
+  /** Combina dos tipos de evento: GOAL / (SHOT + POWER_SHOT) (todo gol va precedido de su tiro). */
   val shotEffectiveness: List[Event] => Double =
     e => ratio(goals(e), shots(e))
 
@@ -71,7 +90,11 @@ object FootballAnalyzer extends GameAnalyzer:
       "assists"           -> assists.toDouble,
       "passAccuracy"      -> passAccuracy(events),
       "shots"             -> shots(events).toDouble,
-      "shotEffectiveness" -> shotEffectiveness(events)
+      "shotEffectiveness" -> shotEffectiveness(events),
+      "powerShots"        -> powerShots(events).toDouble,
+      "saves"             -> saves(events).toDouble,
+      "recoveries"        -> recoveries(events).toDouble,
+      "dribblesWon"       -> dribblesWon(events).toDouble
     )
 
   // ---------------------------------------------------------------------------
@@ -106,9 +129,20 @@ object FootballAnalyzer extends GameAnalyzer:
     }
     (fromStart ++ fromJoins ++ fromActions).distinct
 
+  /** Equipo que suma cada gol, en orden. Un GOAL suma para su equipo; un
+    * OWN_GOAL, para el rival. Lo usan el marcador y la regla COMEBACK.
+    */
+  def goalsInOrder(batch: MatchBatch): List[String] =
+    val all = teams(batch)
+    actions(batch.events).flatMap {
+      case Goal(team, _, _) => List(team)
+      case OwnGoal(team, _) => all.find(_ != team).toList // el rival
+      case _                => Nil
+    }
+
   /** Marcador final: goles por equipo, con 0 para los que no anotaron. */
   def score(batch: MatchBatch): Map[String, Int] =
-    val goalsByTeam = countOccurrences(actions(batch.events).collect { case Goal(team, _, _) => team })
+    val goalsByTeam = countOccurrences(goalsInOrder(batch))
     teams(batch).map(t => t -> goalsByTeam.getOrElse(t, 0)).toMap
 
   /** El equipo con más goles; si el máximo está repetido (empate) -> None. */
