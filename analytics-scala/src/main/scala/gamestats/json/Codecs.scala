@@ -135,21 +135,37 @@ object Codecs:
       case "DNF" =>
         ctx(for lap <- intMin(f, "lap", 1); reason <- oneOf(f, "reason", DnfReason.values.map(r => r.key -> r).toMap)
             yield Dnf(lap, reason))
-      // Football
+      // Football (minute: 0..130 en todas las acciones)
       case "PASS" =>
         ctx(for team <- str(f, "teamId"); target <- str(f, "targetId"); ok <- bool(f, "success")
-                dist <- double(f, "distance"); min <- int(f, "minute")
+                dist <- double(f, "distance").filterOrElse(_ >= 0, "'distance' debe ser ≥ 0"); min <- minute(f)
             yield Pass(team, target, ok, dist, min))
       case "SHOT" =>
-        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- int(f, "minute")
+        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
             yield Shot(team, onTarget, min))
+      case "POWER_SHOT" =>
+        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
+            yield PowerShot(team, onTarget, min))
       case "GOAL" =>
-        ctx(for team <- str(f, "teamId"); assist <- optStr(f, "assistId"); min <- int(f, "minute")
+        ctx(for team <- str(f, "teamId"); assist <- optStr(f, "assistId"); min <- minute(f)
             yield Goal(team, assist, min))
+      case "OWN_GOAL" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield OwnGoal(team, min))
       case "FOUL" =>
         ctx(for team <- str(f, "teamId"); card <- str(f, "card").flatMap(parseCard)
-                min <- int(f, "minute"); target <- optStr(f, "targetId")
+                min <- minute(f); target <- optStr(f, "targetId")
             yield Foul(team, card, min, target))
+      case "SAVE" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Save(team, min))
+      case "TACKLE" =>
+        ctx(for team <- str(f, "teamId"); target <- nonEmptyStr(f, "targetId"); ok <- bool(f, "success"); min <- minute(f)
+            yield Tackle(team, target, ok, min))
+      case "INTERCEPTION" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Interception(team, min))
+      case "DRIBBLE" =>
+        ctx(for team <- str(f, "teamId"); ok <- bool(f, "success"); min <- minute(f) yield Dribble(team, ok, min))
+      case "CORNER" =>
+        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Corner(team, min))
       // Acción que ningún analyzer conoce: no es error, se conserva.
       case other =>
         Right(UnknownAction(other, data))
@@ -348,6 +364,9 @@ object Codecs:
 
   private def longMin(f: Fields, key: String, min: Long): Result[Long] =
     long(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
+
+  /** Minuto de football: informativo, pero dentro del rango del schema. */
+  private def minute(f: Fields): Result[Int] = intIn(f, "minute", 0, 130)
 
   /** Valor dentro de una lista cerrada (los `enum` del schema). */
   private def oneOf[A](f: Fields, key: String, options: Map[String, A]): Result[A] =

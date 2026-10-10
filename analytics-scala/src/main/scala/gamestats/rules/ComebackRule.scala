@@ -56,13 +56,13 @@ object FootballComebackRule extends Rule:
       }
       .toList
 
-  /** foldLeft sobre los GOAL en orden de timestamp, llevando el marcador y el
-    * conjunto de equipos que alguna vez estuvieron abajo.
+  /** foldLeft sobre los goles en orden de timestamp (incluidos los autogoles,
+    * que suman para el rival), llevando el marcador y el conjunto de equipos que
+    * alguna vez estuvieron abajo.
     */
   def replayGoals(batch: MatchBatch): Progress =
     val start = Progress(FootballAnalyzer.teams(batch).map(_ -> 0).toMap, Set.empty)
-    val goals = batch.events.flatMap(_.action).collect { case Goal(team, _, _) => team }
-    goals.foldLeft(start) { (acc, team) =>
+    FootballAnalyzer.goalsInOrder(batch).foldLeft(start) { (acc, team) =>
       val score  = acc.score.updated(team, acc.score.getOrElse(team, 0) + 1)
       // Un equipo va perdiendo si algún otro tiene más goles que él.
       val behind = score.keySet.filter(t => score.exists((other, g) => other != t && g > score(t)))

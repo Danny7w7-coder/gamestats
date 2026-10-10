@@ -96,4 +96,4 @@ class RulesSuite extends munit.FunSuite:
 
   test("cada juego corre solo sus reglas"):
     assertEquals(gamestats.stats.RacingAnalyzer.rules.map(_.name), List("COMEBACK", "CLEAN_RACE", "ITEM_MASTER"))
-    assertEquals(gamestats.stats.FootballAnalyzer.rules.map(_.name), List("COMEBACK", "HAT_TRICK"))
+    assertEquals(gamestats.stats.FootballAnalyzer.rules.map(_.name), List("COMEBACK", "HAT_TRICK", "CLEAN_SHEET"))

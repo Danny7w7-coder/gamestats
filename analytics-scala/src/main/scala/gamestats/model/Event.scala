@@ -47,8 +47,15 @@ sealed trait GameAction:
     case _: Dnf              => "DNF"
     case _: Pass             => "PASS"
     case _: Shot             => "SHOT"
+    case _: PowerShot        => "POWER_SHOT"
     case _: Goal             => "GOAL"
+    case _: OwnGoal          => "OWN_GOAL"
     case _: Foul             => "FOUL"
+    case _: Save             => "SAVE"
+    case _: Tackle           => "TACKLE"
+    case _: Interception     => "INTERCEPTION"
+    case _: Dribble          => "DRIBBLE"
+    case _: Corner           => "CORNER"
     case UnknownAction(n, _) => n
 
 // Racing
@@ -71,6 +78,14 @@ case class Pass(teamId: String, targetId: String, success: Boolean, distance: Do
 case class Shot(teamId: String, onTarget: Boolean, minute: Int)                                    extends GameAction
 case class Goal(teamId: String, assistId: Option[String], minute: Int)                             extends GameAction
 case class Foul(teamId: String, card: Card, minute: Int, targetId: Option[String])                 extends GameAction
+case class PowerShot(teamId: String, onTarget: Boolean, minute: Int)                               extends GameAction
+/** `teamId` es el equipo de quien lo hace: el gol cuenta para el rival. */
+case class OwnGoal(teamId: String, minute: Int)                                                    extends GameAction
+case class Save(teamId: String, minute: Int)                                                       extends GameAction
+case class Tackle(teamId: String, targetId: String, success: Boolean, minute: Int)                 extends GameAction
+case class Interception(teamId: String, minute: Int)                                               extends GameAction
+case class Dribble(teamId: String, success: Boolean, minute: Int)                                  extends GameAction
+case class Corner(teamId: String, minute: Int)                                                     extends GameAction
 
 /** Acción que ningún juego conoce todavía: se conserva tal cual en vez de fallar. */
 case class UnknownAction(name: String, raw: ujson.Value) extends GameAction
