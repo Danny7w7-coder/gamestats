@@ -198,6 +198,25 @@ object Codecs:
             yield RoundWon(r, health, method))
       case "FATALITY" =>
         ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name") yield Fatality(target, name))
+      // Tetris
+      case "PIECE_SPAWNED" => ctx(piece(f, "piece").map(PieceSpawned(_)))
+      case "PIECE_MOVED" =>
+        ctx(oneOf(f, "direction", Side.values.map(s => s.key -> s).toMap).map(PieceMoved(_)))
+      case "PIECE_ROTATED" =>
+        ctx(oneOf(f, "direction", Rotation.values.map(r => r.key -> r).toMap).map(PieceRotated(_)))
+      case "SOFT_DROP" => ctx(intIn(f, "cells", 1, 20).map(SoftDrop(_)))
+      case "HARD_DROP" => ctx(intIn(f, "cells", 0, 20).map(HardDrop(_)))
+      case "HOLD"      => ctx(piece(f, "piece").map(Hold(_)))
+      case "PIECE_PLACED" =>
+        ctx(for p <- piece(f, "piece"); hard <- bool(f, "hardDrop") yield PiecePlaced(p, hard))
+      case "LINES_CLEARED" =>
+        ctx(for lines <- intIn(f, "lines", 1, 4); points <- intMin(f, "points", 0); combo <- intMin(f, "combo", 0)
+            yield LinesCleared(lines, points, combo))
+      case "T_SPIN"       => ctx(intIn(f, "lines", 0, 3).map(TSpin(_)))
+      case "ALL_CLEAR"    => ctx(intIn(f, "lines", 1, 4).map(AllClear(_)))
+      case "LEVEL_UP"     => ctx(intIn(f, "level", 2, 30).map(LevelUp(_)))
+      case "STACK_HEIGHT" => ctx(intIn(f, "rows", 0, 20).map(StackHeight(_)))
+      case "TOP_OUT"      => Right(TopOut)
       // Acción que ningún analyzer conoce: no es error, se conserva.
       case other =>
         Right(UnknownAction(other, data))
@@ -406,6 +425,9 @@ object Codecs:
   /** Daño de un golpe que puede fallar: 0..100, y exactamente 0 si no conectó. */
   private def strike(f: Fields, hit: Boolean): Result[Int] =
     intIn(f, "damage", 0, 100).filterOrElse(d => hit || d == 0, "un golpe que falla no hace daño ('damage' debe ser 0)")
+
+  private def piece(f: Fields, key: String): Result[Piece] =
+    oneOf(f, key, Piece.values.map(p => p.key -> p).toMap)
 
   /** Valor dentro de una lista cerrada (los `enum` del schema). */
   private def oneOf[A](f: Fields, key: String, options: Map[String, A]): Result[A] =

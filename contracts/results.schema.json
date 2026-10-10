@@ -18,7 +18,7 @@
         "eventsByAction":  { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "winner": {
           "type": ["string", "null"],
-          "description": "racing: playerId (ranking.head). football: teamId. Empate o sin datos: null."
+          "description": "racing: playerId (ranking.head). football: teamId. fighting: playerId con más rounds ganados. tetris: siempre null (un solo jugador). Empate o sin datos: null."
         },
         "score": {
           "type": "object",
@@ -42,8 +42,8 @@
         "type": "object",
         "required": ["rule", "playerId", "description"],
         "properties": {
-          "rule":        { "type": "string", "examples": ["COMEBACK", "HAT_TRICK"] },
-          "playerId":    { "type": ["string", "null"], "description": "null en patrones de equipo (COMEBACK de football)." },
+          "rule":        { "type": "string", "examples": ["COMEBACK", "CLEAN_RACE", "ITEM_MASTER", "HAT_TRICK", "CLEAN_SHEET", "FLAWLESS_VICTORY", "FATALITY", "BACK_TO_BACK", "PERFECT_CLEAR", "T_SPIN_MASTER"] },
+          "playerId":    { "type": ["string", "null"], "description": "null en patrones de equipo (COMEBACK y CLEAN_SHEET de football)." },
           "description": { "type": "string" }
         }
       }
@@ -55,7 +55,7 @@
       "properties": {
         "metrics": {
           "type": "object",
-          "description": "Métricas numéricas por nombre. racing: bestLapMs, avgLapMs, consistency, penaltySeconds, effectiveTimeMs. football (jugador): goals, assists, passAccuracy, shots, shotEffectiveness. football (equipo): goals, fouls.",
+          "description": "Métricas numéricas por nombre. racing: bestLapMs, avgLapMs, consistency, penaltySeconds, effectiveTimeMs, overtakes, itemsPicked, itemsUsed, boostsUsed, collisions. football (jugador): goals, assists, passAccuracy, shots, shotEffectiveness, powerShots, saves, recoveries, dribblesWon. football (equipo): goals, fouls, corners. fighting: damageDealt, accuracy, maxCombo, specials, blocks, comboBreakers, knockdowns, roundsWon. tetris: score, lines, tetrises, piecesPlaced, piecesPerMinute, maxLevel, maxCombo, tSpins, hardDrops.",
           "additionalProperties": { "type": "number" }
         }
       }

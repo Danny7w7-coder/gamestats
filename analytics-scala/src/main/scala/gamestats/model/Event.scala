@@ -37,6 +37,24 @@ enum WinMethod(val key: String):
   case Ko      extends WinMethod("ko")
   case Timeout extends WinMethod("timeout")
 
+/** Las 7 piezas de tetris; `key` es la letra con la que viajan en el JSON. */
+enum Piece(val key: String):
+  case I extends Piece("I")
+  case O extends Piece("O")
+  case T extends Piece("T")
+  case S extends Piece("S")
+  case Z extends Piece("Z")
+  case J extends Piece("J")
+  case L extends Piece("L")
+
+enum Side(val key: String):
+  case Left  extends Side("left")
+  case Right extends Side("right")
+
+enum Rotation(val key: String):
+  case Clockwise        extends Rotation("cw")
+  case CounterClockwise extends Rotation("ccw")
+
 /** Acción de juego dentro de un PLAYER_ACTION. `sealed` hace que el compilador
   * avise si un `match` olvida algún caso.
   */
@@ -77,6 +95,19 @@ sealed trait GameAction:
     case _: FatalBlow        => "FATAL_BLOW"
     case _: RoundWon         => "ROUND_WON"
     case _: Fatality         => "FATALITY"
+    case _: PieceSpawned     => "PIECE_SPAWNED"
+    case _: PieceMoved       => "PIECE_MOVED"
+    case _: PieceRotated     => "PIECE_ROTATED"
+    case _: SoftDrop         => "SOFT_DROP"
+    case _: HardDrop         => "HARD_DROP"
+    case _: Hold             => "HOLD"
+    case _: PiecePlaced      => "PIECE_PLACED"
+    case _: LinesCleared     => "LINES_CLEARED"
+    case _: TSpin            => "T_SPIN"
+    case _: AllClear         => "ALL_CLEAR"
+    case _: LevelUp          => "LEVEL_UP"
+    case _: StackHeight      => "STACK_HEIGHT"
+    case TopOut              => "TOP_OUT"
     case UnknownAction(n, _) => n
 
 // Racing
@@ -120,6 +151,22 @@ case class Knockdown(targetId: String, round: Int)                              
 case class FatalBlow(targetId: String, hit: Boolean, damage: Int, health: Int, round: Int)         extends GameAction
 case class RoundWon(round: Int, remainingHealth: Int, method: WinMethod)                           extends GameAction
 case class Fatality(targetId: String, name: String)                                                extends GameAction
+
+// Tetris (un solo jugador)
+case class PieceSpawned(piece: Piece)                          extends GameAction
+case class PieceMoved(direction: Side)                         extends GameAction
+case class PieceRotated(rotation: Rotation)                    extends GameAction
+case class SoftDrop(cells: Int)                                extends GameAction
+case class HardDrop(cells: Int)                                extends GameAction
+case class Hold(piece: Piece)                                  extends GameAction
+case class PiecePlaced(piece: Piece, hardDrop: Boolean)        extends GameAction
+case class LinesCleared(lines: Int, points: Int, combo: Int)   extends GameAction
+case class TSpin(lines: Int)                                   extends GameAction
+case class AllClear(lines: Int)                                extends GameAction
+case class LevelUp(level: Int)                                 extends GameAction
+case class StackHeight(rows: Int)                              extends GameAction
+/** Game over: la pila llegó arriba. No lleva datos. */
+case object TopOut                                             extends GameAction
 
 /** Acción que ningún juego conoce todavía: se conserva tal cual en vez de fallar. */
 case class UnknownAction(name: String, raw: ujson.Value) extends GameAction
