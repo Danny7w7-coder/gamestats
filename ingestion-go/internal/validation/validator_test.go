@@ -49,15 +49,21 @@ func TestValidate(t *testing.T) {
 
 		// Regla 3: gameId en el catálogo.
 		{"r3 válido: football", func(e *model.Event) { e.GameID = "football"; e.Action = "PASS" }, ""},
+		{"r3 válido: fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "COMBO" }, ""},
+		{"r3 válido: tetris", func(e *model.Event) { e.GameID = "tetris"; e.Action = "T_SPIN" }, ""},
 		{"r3 inválido: juego desconocido", func(e *model.Event) { e.GameID = "chess" }, "gameId desconocido"},
 
 		// Regla 4: type válido.
 		{"r4 válido: PLAYER_JOINED", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
+		{"r4 válido: MATCH_PAUSED", func(e *model.Event) { e.Type = "MATCH_PAUSED"; e.Action = "" }, ""},
+		{"r4 válido: MATCH_RESUMED", func(e *model.Event) { e.Type = "MATCH_RESUMED"; e.Action = "" }, ""},
 		{"r4 inválido: type desconocido", func(e *model.Event) { e.Type = "PLAYER_DANCED" }, "type desconocido"},
 
-		// Regla 5: playerId obligatorio salvo en MATCH_STARTED / MATCH_FINISHED.
+		// Regla 5: playerId obligatorio salvo en los eventos de partida.
 		{"r5 válido: MATCH_STARTED sin playerId", func(e *model.Event) { e.Type = "MATCH_STARTED"; e.Action = ""; e.PlayerID = "" }, ""},
 		{"r5 válido: MATCH_FINISHED sin playerId", func(e *model.Event) { e.Type = "MATCH_FINISHED"; e.Action = ""; e.PlayerID = "" }, ""},
+		{"r5 válido: MATCH_PAUSED sin playerId", func(e *model.Event) { e.Type = "MATCH_PAUSED"; e.Action = ""; e.PlayerID = "" }, ""},
+		{"r5 válido: MATCH_RESUMED sin playerId", func(e *model.Event) { e.Type = "MATCH_RESUMED"; e.Action = ""; e.PlayerID = "" }, ""},
 		{"r5 inválido: PLAYER_ACTION sin playerId", func(e *model.Event) { e.PlayerID = "" }, "falta el campo playerId"},
 		{"r5 inválido: PLAYER_LEFT sin playerId", func(e *model.Event) { e.Type = "PLAYER_LEFT"; e.Action = ""; e.PlayerID = "" }, "falta el campo playerId"},
 
@@ -65,11 +71,17 @@ func TestValidate(t *testing.T) {
 		{"r6 válido: GOAL en football", func(e *model.Event) { e.GameID = "football"; e.Action = "GOAL" }, ""},
 		{"r6 inválido: sin action", func(e *model.Event) { e.Action = "" }, "falta el campo action"},
 		{"r6 inválido: GOAL en racing", func(e *model.Event) { e.Action = "GOAL" }, `la acción "GOAL" no existe en el juego "racing"`},
+		{"r6 válido: OWN_GOAL en football", func(e *model.Event) { e.GameID = "football"; e.Action = "OWN_GOAL" }, ""},
+		{"r6 válido: FATALITY en fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "FATALITY" }, ""},
+		{"r6 válido: TOP_OUT en tetris", func(e *model.Event) { e.GameID = "tetris"; e.Action = "TOP_OUT" }, ""},
+		{"r6 inválido: GOAL en fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "GOAL" }, `la acción "GOAL" no existe en el juego "fighting"`},
+		{"r6 inválido: LAP_COMPLETED en tetris", func(e *model.Event) { e.GameID = "tetris" }, `la acción "LAP_COMPLETED" no existe en el juego "tetris"`},
 		{"r6 inválido: acción inventada", func(e *model.Event) { e.Action = "JUMP" }, "no existe en el juego"},
 
 		// Regla 7: action solo en PLAYER_ACTION.
 		{"r7 válido: PLAYER_JOINED sin action", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
 		{"r7 inválido: MATCH_STARTED con action", func(e *model.Event) { e.Type = "MATCH_STARTED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
+		{"r7 inválido: MATCH_PAUSED con action", func(e *model.Event) { e.Type = "MATCH_PAUSED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
 	}
 
 	for _, tt := range tests {
@@ -98,6 +110,10 @@ func TestValidate(t *testing.T) {
 // TestValidateContractFixtures valida los eventos de los fixtures de Danny
 // (contracts/fixtures/, solo lectura). Cada fixture es un lote: se validan sus
 // "events". Si la carpeta no existe (por ejemplo, fuera del repo), se salta.
+//
+// Los *_invalid_events.json NO tienen rechazos en Go: sus eventos "bad-*"
+// tienen data mal formada o rompen una regla de contexto, y eso lo valida
+// Scala. Go solo revisa formato y catálogo.
 func TestValidateContractFixtures(t *testing.T) {
 	dir := filepath.Join("..", "..", "..", "contracts", "fixtures")
 	if _, err := os.Stat(dir); err != nil {
@@ -112,6 +128,16 @@ func TestValidateContractFixtures(t *testing.T) {
 		{"comeback_case.json", nil},
 		{"football_match_ok.json", nil},
 		{"football_comeback.json", nil},
+		{"racing_full_ok.json", nil},
+		{"football_full_ok.json", nil},
+		{"fighting_match_ok.json", nil},
+		{"fighting_comeback.json", nil},
+		{"tetris_match_ok.json", nil},
+		{"tetris_perfect_clear.json", nil},
+		{"racing_invalid_events.json", nil},
+		{"football_invalid_events.json", nil},
+		{"fighting_invalid_events.json", nil},
+		{"tetris_invalid_events.json", nil},
 		{"invalid_bad_timestamp.json", []string{"y-e02"}},
 	}
 
