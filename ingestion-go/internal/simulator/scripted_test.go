@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"gamestats/ingestion/internal/validation"
 )
 
 // scriptedByName devuelve los escenarios de la semilla 42 por nombre
@@ -25,8 +27,8 @@ func scriptedByName(t *testing.T) (racing, football map[string]Match) {
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
 	ms := Generate(42, 0, 0)
-	if len(ms) != 8 {
-		t.Fatalf("escenarios = %d, se esperaban 8", len(ms))
+	if len(ms) != 9 {
+		t.Fatalf("escenarios = %d, se esperaban 9", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -34,8 +36,8 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, 2, 3)); got != 8+2+3 {
-		t.Fatalf("partidas = %d, se esperaban 13", got)
+	if got := len(Generate(42, 2, 3)); got != 9+2+3 {
+		t.Fatalf("partidas = %d, se esperaban 14", got)
 	}
 }
 
@@ -166,34 +168,55 @@ func TestScriptedRacing(t *testing.T) {
 }
 
 // footballSummary resume un partido: el marcador después de cada gol, goles
-// por jugador, tiros por jugador, rojas y goles sin asistencia.
+// por jugador, tiros por jugador, atajadas, autogoles, rojas, goles sin
+// asistencia y goles de tiro potente.
 type footballSummary struct {
 	scoreTimeline []string // ej. ["0-1", "1-1", "2-1"] (A-B)
 	goals         map[string]int
 	shots         map[string]int
+	saves         map[string]int
+	ownGoals      int
 	reds          []string
 	unassisted    int
+	powerGoals    int
 }
 
 func summarize(t *testing.T, m Match) footballSummary {
 	t.Helper()
-	s := footballSummary{goals: map[string]int{}, shots: map[string]int{}}
+	s := footballSummary{goals: map[string]int{}, shots: map[string]int{}, saves: map[string]int{}}
 	score := map[string]int{}
+	lastShot := map[string]string{} // jugador -> acción de su último tiro
+	addGoal := func(team string) {
+		score[team]++
+		s.scoreTimeline = append(s.scoreTimeline, strconv.Itoa(score["A"])+"-"+strconv.Itoa(score["B"]))
+	}
 	for _, e := range m.Events {
 		if e.Type != "PLAYER_ACTION" {
 			continue
 		}
 		d := data(t, e)
 		switch e.Action {
-		case "SHOT":
+		case "SHOT", "POWER_SHOT":
 			s.shots[e.PlayerID]++
+			lastShot[e.PlayerID] = e.Action
 		case "GOAL":
-			score[d["teamId"].(string)]++
+			addGoal(d["teamId"].(string))
 			s.goals[e.PlayerID]++
-			s.scoreTimeline = append(s.scoreTimeline, strconv.Itoa(score["A"])+"-"+strconv.Itoa(score["B"]))
 			if _, ok := d["assistId"]; !ok {
 				s.unassisted++
 			}
+			if lastShot[e.PlayerID] == "POWER_SHOT" {
+				s.powerGoals++
+			}
+		case "OWN_GOAL": // suma para el otro equipo
+			s.ownGoals++
+			if d["teamId"] == "A" {
+				addGoal("B")
+			} else {
+				addGoal("A")
+			}
+		case "SAVE":
+			s.saves[e.PlayerID]++
 		case "FOUL":
 			if d["card"] == "red" {
 				s.reds = append(s.reds, e.PlayerID)
@@ -210,8 +233,8 @@ func TestScriptedFootball(t *testing.T) {
 	if !reflect.DeepEqual(cb.scoreTimeline, []string{"0-1", "1-1", "2-1"}) {
 		t.Errorf("comeback: marcador %v, se esperaba B adelante y A ganando 2-1", cb.scoreTimeline)
 	}
-	if !reflect.DeepEqual(cb.reds, []string{"p6"}) {
-		t.Errorf("comeback: rojas %v, se esperaba [p6]", cb.reds)
+	if !reflect.DeepEqual(cb.reds, []string{"p12"}) {
+		t.Errorf("comeback: rojas %v, se esperaba [p12]", cb.reds)
 	}
 	if cb.unassisted != 1 {
 		t.Errorf("comeback: goles sin asistencia = %d, se esperaba 1", cb.unassisted)
@@ -221,17 +244,47 @@ func TestScriptedFootball(t *testing.T) {
 	if final := draw.scoreTimeline[len(draw.scoreTimeline)-1]; final != "1-1" {
 		t.Errorf("draw: marcador final %s, se esperaba 1-1", final)
 	}
-	for _, p := range []string{"p3", "p6"} {
+	for _, p := range []string{"p4", "p10"} {
 		if draw.shots[p] != 0 {
 			t.Errorf("draw: %s tiene %d tiros, se esperaban 0", p, draw.shots[p])
 		}
 	}
 
 	ht := summarize(t, football["hattrick"])
-	if ht.goals["p1"] != 3 {
-		t.Errorf("hattrick: p1 tiene %d goles, se esperaban 3", ht.goals["p1"])
+	if ht.goals["p4"] != 3 {
+		t.Errorf("hattrick: p4 tiene %d goles, se esperaban 3", ht.goals["p4"])
 	}
 	if final := ht.scoreTimeline[len(ht.scoreTimeline)-1]; final != "3-1" {
 		t.Errorf("hattrick: marcador final %s, se esperaba 3-1", final)
+	}
+
+	// Valla invicta: A gana 3-0 con un autogol, un gol de tiro potente y 2
+	// atajadas de su portero; además usa las 11 acciones.
+	cs := summarize(t, football["cleansheet"])
+	if final := cs.scoreTimeline[len(cs.scoreTimeline)-1]; final != "3-0" {
+		t.Errorf("cleansheet: marcador final %s, se esperaba 3-0", final)
+	}
+	if cs.ownGoals != 1 || cs.powerGoals != 1 || cs.saves["p1"] != 2 {
+		t.Errorf("cleansheet: autogoles=%d goles potentes=%d atajadas de p1=%d", cs.ownGoals, cs.powerGoals, cs.saves["p1"])
+	}
+	used := map[string]bool{}
+	for _, e := range football["cleansheet"].Events {
+		used[e.Action] = true
+	}
+	for action := range validation.GameActions["football"] {
+		if !used[action] {
+			t.Errorf("cleansheet: no usa %s", action)
+		}
+	}
+
+	// Todos los partidos tienen el entretiempo como pausa.
+	for name, m := range football {
+		paused := false
+		for _, e := range m.Events {
+			paused = paused || (e.Type == "MATCH_PAUSED" && string(e.Data) == `{"reason":"half_time"}`)
+		}
+		if !paused {
+			t.Errorf("%s: sin entretiempo", name)
+		}
 	}
 }

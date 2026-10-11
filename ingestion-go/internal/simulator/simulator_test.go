@@ -216,7 +216,11 @@ func TestRacingUsesAllActions(t *testing.T) {
 	}
 }
 
-// checkFootball revisa las reglas de la sección 5.3.
+// checkFootball revisa las reglas de contexto de football (las mismas que
+// aplica Scala): 6 por equipo y todos entran antes de jugar, el teamId de
+// cada acción es el de su equipo, todo GOAL va precedido de un tiro al arco
+// del mismo jugador (≥1 s antes), pases y asistencias entre compañeros, y
+// nada después de una roja.
 func checkFootball(t *testing.T, m Match) {
 	t.Helper()
 	start := data(t, m.Events[0])
@@ -225,6 +229,7 @@ func checkFootball(t *testing.T, m Match) {
 	}
 
 	teamOf := map[string]string{}
+	teamSize := map[string]int{}
 	sentOff := map[string]bool{}
 	lastOnTargetShot := map[string]time.Time{} // jugador -> hora de su último tiro al arco
 
@@ -233,11 +238,16 @@ func checkFootball(t *testing.T, m Match) {
 			t.Fatalf("%s: %s generó %s después de su roja", m.ID, e.PlayerID, e.EventID)
 		}
 		if e.Type == "PLAYER_JOINED" {
-			teamOf[e.PlayerID] = data(t, e)["teamId"].(string)
+			team := data(t, e)["teamId"].(string)
+			teamOf[e.PlayerID] = team
+			teamSize[team]++
 			continue
 		}
 		if e.Type != "PLAYER_ACTION" {
 			continue
+		}
+		if teamOf[e.PlayerID] == "" {
+			t.Fatalf("%s: %s juega sin haber entrado a un equipo", m.ID, e.PlayerID)
 		}
 
 		d := data(t, e)
@@ -247,27 +257,55 @@ func checkFootball(t *testing.T, m Match) {
 		ts, _ := time.Parse(time.RFC3339, e.Timestamp)
 
 		switch e.Action {
-		case "SHOT":
+		case "SHOT", "POWER_SHOT":
 			if d["onTarget"] == true {
 				lastOnTargetShot[e.PlayerID] = ts
 			}
 		case "GOAL":
 			shotAt, ok := lastOnTargetShot[e.PlayerID]
 			if !ok || ts.Sub(shotAt) < time.Second {
-				t.Fatalf("%s: GOAL %s sin SHOT al arco previo (≥1 s) del mismo jugador", m.ID, e.EventID)
+				t.Fatalf("%s: GOAL %s sin tiro al arco previo (≥1 s) del mismo jugador", m.ID, e.EventID)
 			}
 			delete(lastOnTargetShot, e.PlayerID) // un tiro, un gol
-			if a, ok := d["assistId"]; ok && (a == e.PlayerID || teamOf[a.(string)] != teamOf[e.PlayerID]) {
-				t.Fatalf("%s: asistencia inválida en %s", m.ID, e.EventID)
+			if a, ok := d["assistId"]; ok && teamOf[a.(string)] != teamOf[e.PlayerID] {
+				t.Fatalf("%s: asistencia de un rival en %s", m.ID, e.EventID)
 			}
 		case "PASS":
-			if d["targetId"] == e.PlayerID || teamOf[d["targetId"].(string)] != teamOf[e.PlayerID] {
-				t.Fatalf("%s: pase inválido en %s", m.ID, e.EventID)
+			if teamOf[d["targetId"].(string)] != teamOf[e.PlayerID] {
+				t.Fatalf("%s: pase a un rival en %s", m.ID, e.EventID)
+			}
+		case "TACKLE":
+			if teamOf[d["targetId"].(string)] == teamOf[e.PlayerID] {
+				t.Fatalf("%s: barrida a un compañero en %s", m.ID, e.EventID)
 			}
 		case "FOUL":
 			if d["card"] == "red" {
 				sentOff[e.PlayerID] = true
 			}
+		}
+	}
+	if teamSize[homeTeam] != 6 || teamSize[awayTeam] != 6 {
+		t.Fatalf("%s: equipos de %d y %d jugadores, se esperaban 6 y 6", m.ID, teamSize[homeTeam], teamSize[awayTeam])
+	}
+}
+
+// Entre muchos partidos al azar aparecen todas las acciones de football del
+// catálogo.
+func TestFootballUsesAllActions(t *testing.T) {
+	used := map[string]bool{}
+	for seed := int64(1); seed <= 50; seed++ {
+		for _, m := range Generate(seed, 0, 3) {
+			if m.Script != "" {
+				continue
+			}
+			for _, e := range m.Events {
+				used[e.Action] = true
+			}
+		}
+	}
+	for action := range validation.GameActions["football"] {
+		if !used[action] {
+			t.Errorf("ningún partido al azar usó %s", action)
 		}
 	}
 }

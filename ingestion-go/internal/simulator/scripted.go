@@ -24,6 +24,7 @@ func scriptedMatches(seed int64) []Match {
 		footballComeback(id("foot", "comeback"), scriptBase.Add(1*time.Hour)),
 		footballDraw(id("foot", "draw"), scriptBase.Add(3*time.Hour)),
 		footballHatTrick(id("foot", "hattrick"), scriptBase.Add(5*time.Hour)),
+		footballCleanSheet(id("foot", "cleansheet"), scriptBase.Add(7*time.Hour)),
 	}
 }
 
@@ -137,118 +138,97 @@ func racePauseDNF(id string, start time.Time) Match {
 
 // ---------------------------------------------------------------------------
 // Football
+//
+// Todos los partidos son 6 vs 6 con entretiempo (newFootballGame).
+// Equipo A: p1 (portero), p2 a p6. Equipo B: p7 (portero), p8 a p12.
 
-// footballScript ayuda a escribir un partido evento por evento.
-// Equipo A: p1, p2, p3. Equipo B: p4, p5, p6.
-type footballScript struct {
-	b       *builder
-	kickoff time.Time
-	teamOf  map[string]string
-}
-
-func newFootballScript(id string, start time.Time) *footballScript {
-	s := &footballScript{b: newBuilder(id, "football"), kickoff: start.Add(time.Minute), teamOf: map[string]string{}}
-	s.b.add(start, "MATCH_STARTED", "", "", map[string]any{"homeTeam": homeTeam, "awayTeam": awayTeam})
-	for i, p := range playerIDs(6) {
-		team := homeTeam
-		if i >= 3 {
-			team = awayTeam
-		}
-		s.teamOf[p] = team
-		s.b.add(start.Add(time.Duration(i+1)*time.Second), "PLAYER_JOINED", p, "", map[string]any{"teamId": team})
-	}
-	return s
-}
-
-// at devuelve la hora del minuto y segundo de juego.
-func (s *footballScript) at(minute, second int) time.Time {
-	return s.kickoff.Add(time.Duration(minute)*time.Minute + time.Duration(second)*time.Second)
-}
-
-func (s *footballScript) pass(minute, second int, from, to string, success bool, distance float64) {
-	s.b.add(s.at(minute, second), "PLAYER_ACTION", from, "PASS", map[string]any{
-		"teamId": s.teamOf[from], "targetId": to, "success": success, "distance": distance, "minute": minute,
-	})
-}
-
-func (s *footballScript) shot(minute, second int, player string, onTarget bool) {
-	s.b.add(s.at(minute, second), "PLAYER_ACTION", player, "SHOT", map[string]any{
-		"teamId": s.teamOf[player], "onTarget": onTarget, "minute": minute,
-	})
-}
-
-// goal agrega el SHOT al arco y, 2 s después, el GOAL del mismo jugador
-// (regla 5.3). assist vacío = gol sin asistencia.
-func (s *footballScript) goal(minute, second int, player, assist string) {
-	s.shot(minute, second, player, true)
-	data := map[string]any{"teamId": s.teamOf[player], "minute": minute}
-	if assist != "" {
-		data["assistId"] = assist
-	}
-	s.b.add(s.at(minute, second+2), "PLAYER_ACTION", player, "GOAL", data)
-}
-
-func (s *footballScript) foul(minute, second int, player, target, card string) {
-	s.b.add(s.at(minute, second), "PLAYER_ACTION", player, "FOUL", map[string]any{
-		"teamId": s.teamOf[player], "targetId": target, "card": card, "minute": minute,
-	})
-}
-
-func (s *footballScript) finish(script string) Match {
-	s.b.add(s.at(92, 0), "MATCH_FINISHED", "", "", map[string]any{})
-	m := s.b.build()
+// scripted le pone la descripción al partido terminado.
+func scripted(m Match, script string) Match {
 	m.Script = script
 	return m
 }
 
 // footballComeback: B gana 1-0 y A remonta 2-1. Además:
-//   - tarjeta roja a p6 (minuto 30); después no vuelve a aparecer;
-//   - gol de p2 sin asistencia (minuto 55).
+//   - tarjeta roja a p12 (minuto 30); después no vuelve a aparecer;
+//   - gol de p3 sin asistencia (minuto 55).
 func footballComeback(id string, start time.Time) Match {
-	s := newFootballScript(id, start)
-	s.pass(10, 0, "p4", "p5", true, 18.0)
-	s.goal(10, 15, "p5", "p4") // 0-1
-	s.pass(22, 0, "p1", "p2", false, 25.5)
-	s.foul(30, 0, "p6", "p2", "red") // p6 expulsado
-	s.pass(41, 0, "p3", "p2", true, 12.0)
-	s.shot(41, 20, "p2", false)
-	s.goal(55, 0, "p2", "") // 1-1, sin asistencia
-	s.pass(70, 0, "p3", "p1", true, 20.0)
-	s.shot(70, 10, "p1", false)
-	s.pass(78, 0, "p3", "p1", true, 16.5)
-	s.goal(78, 10, "p1", "p3") // 2-1
-	s.shot(85, 0, "p5", false)
-	return s.finish("remontada: B gana 1-0 y A gana 2-1; roja a p6; gol de p2 sin asistencia")
+	g := newFootballGame(id, start)
+	g.pass(10, 0, "p8", "p9", true, 18.0)
+	g.goal(10, 15, "p9", "p8", false) // 0-1
+	g.pass(22, 0, "p2", "p3", false, 25.5)
+	g.interception(22, 3, "p10")
+	g.foul(30, 0, "p12", "p3", "red") // p12 expulsado
+	g.pass(41, 0, "p4", "p3", true, 12.0)
+	g.save(41, 20, "p3", false)    // ataja p7
+	g.goal(55, 0, "p3", "", false) // 1-1, sin asistencia
+	g.pass(70, 0, "p4", "p2", true, 20.0)
+	g.shot(70, 10, "p2", false, false)
+	g.corner(77, 0, "p5")
+	g.goal(78, 10, "p2", "p4", false) // 2-1
+	g.shot(85, 0, "p9", false, false)
+	return scripted(g.finish(92), "remontada: B gana 1-0 y A gana 2-1; roja a p12; gol de p3 sin asistencia")
 }
 
-// footballDraw: empate 1-1. p3 y p6 juegan (pases, faltas) pero no tiran.
+// footballDraw: empate 1-1. p4 y p10 juegan (pases, faltas, barridas) pero
+// no tiran al arco.
 func footballDraw(id string, start time.Time) Match {
-	s := newFootballScript(id, start)
-	s.pass(5, 0, "p3", "p2", true, 14.0)
-	s.pass(12, 0, "p2", "p1", true, 22.0)
-	s.goal(12, 10, "p1", "p2") // 1-0
-	s.foul(20, 0, "p3", "p4", "yellow")
-	s.pass(33, 0, "p6", "p4", true, 10.5)
-	s.shot(33, 15, "p4", false)
-	s.pass(50, 0, "p6", "p5", true, 19.0)
-	s.goal(50, 10, "p5", "p6") // 1-1
-	s.pass(66, 0, "p3", "p1", false, 30.0)
-	s.shot(80, 0, "p2", false)
-	s.foul(88, 0, "p6", "p1", "none")
-	return s.finish("empate 1-1; p3 y p6 no tiran al arco")
+	g := newFootballGame(id, start)
+	g.pass(5, 0, "p4", "p3", true, 14.0)
+	g.pass(12, 0, "p3", "p2", true, 22.0)
+	g.goal(12, 10, "p2", "p3", false) // 1-0
+	g.foul(20, 0, "p4", "p8", "yellow")
+	g.dribble(28, 0, "p11", true)
+	g.pass(33, 0, "p10", "p8", true, 10.5)
+	g.shot(33, 15, "p8", false, false)
+	g.pass(50, 0, "p10", "p9", true, 19.0)
+	g.goal(50, 10, "p9", "p10", false) // 1-1
+	g.tackle(60, 0, "p4", "p9", true)
+	g.pass(66, 0, "p4", "p2", false, 30.0)
+	g.save(80, 0, "p2", false) // ataja p7
+	g.foul(88, 0, "p10", "p2", "none")
+	return scripted(g.finish(92), "empate 1-1; p4 y p10 no tiran al arco")
 }
 
-// footballHatTrick: p1 mete 3 goles y A gana 3-1.
+// footballHatTrick: p4 mete 3 goles (uno de tiro potente) y A gana 3-1.
 func footballHatTrick(id string, start time.Time) Match {
-	s := newFootballScript(id, start)
-	s.pass(15, 0, "p2", "p1", true, 17.0)
-	s.goal(15, 10, "p1", "p2") // 1-0
-	s.shot(30, 0, "p1", false)
-	s.goal(44, 0, "p1", "") // 2-0
-	s.pass(60, 0, "p5", "p4", true, 21.0)
-	s.goal(60, 10, "p4", "p5") // 2-1
-	s.pass(80, 0, "p3", "p1", true, 15.0)
-	s.goal(80, 10, "p1", "p3") // 3-1, hat-trick
-	s.foul(86, 0, "p5", "p1", "yellow")
-	return s.finish("hat-trick de p1; A gana 3-1")
+	g := newFootballGame(id, start)
+	g.pass(15, 0, "p2", "p4", true, 17.0)
+	g.goal(15, 10, "p4", "p2", false) // 1-0
+	g.shot(30, 0, "p4", false, false)
+	g.goal(44, 0, "p4", "", true) // 2-0, tiro potente
+	g.pass(60, 0, "p9", "p8", true, 21.0)
+	g.goal(60, 10, "p8", "p9", false) // 2-1
+	g.pass(80, 0, "p3", "p4", true, 15.0)
+	g.goal(80, 10, "p4", "p3", false) // 3-1, hat-trick
+	g.foul(86, 0, "p9", "p4", "yellow")
+	return scripted(g.finish(92), "hat-trick de p4; A gana 3-1")
+}
+
+// footballCleanSheet: A gana 3-0 sin recibir goles (valla invicta). Los goles
+// son un autogol de p10 (B), un tiro potente de p5 y un gol de p3 con
+// asistencia de p2. p1 (portero de A) ataja 2 tiros y p12 (B) ve la roja.
+// Usa las 11 acciones de football.
+func footballCleanSheet(id string, start time.Time) Match {
+	g := newFootballGame(id, start)
+	g.pass(3, 0, "p2", "p3", true, 18.5)
+	g.dribble(3, 20, "p3", true)
+	g.save(4, 0, "p3", false) // ataja p7
+	g.corner(6, 0, "p5")
+	g.pass(8, 0, "p8", "p9", false, 25.5)
+	g.interception(8, 5, "p6")
+	g.save(10, 0, "p9", false) // ataja p1
+	g.ownGoal(12, 0, "p10")    // 1-0 (autogol de B)
+	g.foul(20, 0, "p11", "p2", "yellow")
+	g.tackle(25, 0, "p12", "p3", true)
+	g.goal(30, 0, "p5", "", true) // 2-0, tiro potente
+	g.dribble(55, 0, "p8", false)
+	g.tackle(55, 2, "p6", "p8", true)
+	g.foul(62, 0, "p12", "p6", "red") // p12 expulsado
+	g.shot(70, 0, "p9", true, false)
+	g.corner(75, 0, "p8")
+	g.save(75, 20, "p11", false) // ataja p1
+	g.pass(80, 0, "p2", "p3", true, 20.5)
+	g.goal(80, 15, "p3", "p2", false) // 3-0
+	g.shot(88, 0, "p9", false, false)
+	return scripted(g.finish(91), "valla invicta: A gana 3-0 con autogol de p10, tiro potente de p5 y 2 atajadas de p1")
 }
