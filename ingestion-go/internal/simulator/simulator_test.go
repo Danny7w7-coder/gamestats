@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -14,12 +15,13 @@ import (
 )
 
 func TestSameSeedSameMatches(t *testing.T) {
-	a := Generate(42, 3, 3)
-	b := Generate(42, 3, 3)
+	n := Counts{Racing: 3, Football: 3, Fighting: 3}
+	a := Generate(42, n)
+	b := Generate(42, n)
 	if !reflect.DeepEqual(a, b) {
 		t.Fatal("la misma semilla generó partidas distintas")
 	}
-	if reflect.DeepEqual(a, Generate(7, 3, 3)) {
+	if reflect.DeepEqual(a, Generate(7, n)) {
 		t.Fatal("semillas distintas generaron las mismas partidas")
 	}
 }
@@ -27,13 +29,15 @@ func TestSameSeedSameMatches(t *testing.T) {
 // Revisa muchas semillas para atrapar casos raros.
 func TestGeneratedMatchesFollowTheRules(t *testing.T) {
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, 2, 2) {
+		for _, m := range Generate(seed, Counts{Racing: 2, Football: 2, Fighting: 2}) {
 			checkCommon(t, m)
 			switch m.GameID {
 			case "racing":
 				checkRacing(t, m)
 			case "football":
 				checkFootball(t, m)
+			case "fighting":
+				checkFighting(t, m)
 			}
 		}
 	}
@@ -200,7 +204,7 @@ func checkRacing(t *testing.T, m Match) {
 func TestRacingUsesAllActions(t *testing.T) {
 	used := map[string]bool{}
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, 3, 0) {
+		for _, m := range Generate(seed, Counts{Racing: 3}) {
 			if m.Script != "" {
 				continue
 			}
@@ -294,7 +298,7 @@ func checkFootball(t *testing.T, m Match) {
 func TestFootballUsesAllActions(t *testing.T) {
 	used := map[string]bool{}
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, 0, 3) {
+		for _, m := range Generate(seed, Counts{Football: 3}) {
 			if m.Script != "" {
 				continue
 			}
@@ -306,6 +310,107 @@ func TestFootballUsesAllActions(t *testing.T) {
 	for action := range validation.GameActions["football"] {
 		if !used[action] {
 			t.Errorf("ningún partido al azar usó %s", action)
+		}
+	}
+}
+
+// checkFighting revisa las reglas de contexto de fighting (las mismas que
+// aplica Scala): 2 luchadores con personaje, round ≤ rounds, golpe fallado
+// con damage 0, COMBO_BREAKER solo tras un COMBO del rival en ese round,
+// FATAL_BLOW una vez por luchador y con health ≤ 30, un ROUND_WON por round,
+// y la FATALITY la hace el ganador y es la última acción.
+func checkFighting(t *testing.T, m Match) {
+	t.Helper()
+	start := data(t, m.Events[0])
+	rounds := int(start["rounds"].(float64))
+	if start["stage"] == "" || (rounds != 1 && rounds != 3 && rounds != 5) {
+		t.Fatalf("%s: MATCH_STARTED con data %v", m.ID, start)
+	}
+
+	joined := 0
+	comboOn := map[string]string{} // víctima -> "atacante/round" de su último combo sin cortar
+	fatalUsed := map[string]bool{}
+	roundDone := map[int]bool{}
+	wins := map[string]int{}
+	finished := false
+
+	for _, e := range m.Events {
+		if e.Type == "PLAYER_JOINED" {
+			joined++
+			if data(t, e)["character"] == "" {
+				t.Fatalf("%s: %s sin personaje", m.ID, e.EventID)
+			}
+		}
+		if e.Type != "PLAYER_ACTION" {
+			continue
+		}
+		if finished {
+			t.Fatalf("%s: %s después de la FATALITY", m.ID, e.EventID)
+		}
+		d := data(t, e)
+		round := 0
+		if r, ok := d["round"]; ok {
+			round = int(r.(float64))
+			if round < 1 || round > rounds {
+				t.Fatalf("%s: %s en el round %d de %d", m.ID, e.EventID, round, rounds)
+			}
+		}
+		if d["hit"] == false && d["damage"] != 0.0 {
+			t.Fatalf("%s: %s falló pero tiene damage %v", m.ID, e.EventID, d["damage"])
+		}
+		key := e.PlayerID + "/" + strconv.Itoa(round)
+
+		switch e.Action {
+		case "COMBO":
+			comboOn[d["targetId"].(string)] = key
+		case "COMBO_BREAKER":
+			if comboOn[e.PlayerID] != d["attackerId"].(string)+"/"+strconv.Itoa(round) {
+				t.Fatalf("%s: %s corta un combo que no existe", m.ID, e.EventID)
+			}
+			delete(comboOn, e.PlayerID)
+		case "FATAL_BLOW":
+			if fatalUsed[e.PlayerID] || d["health"].(float64) > 30 {
+				t.Fatalf("%s: %s FATAL_BLOW repetido o con health %v", m.ID, e.EventID, d["health"])
+			}
+			fatalUsed[e.PlayerID] = true
+		case "ROUND_WON":
+			if roundDone[round] {
+				t.Fatalf("%s: el round %d tiene dos ganadores", m.ID, round)
+			}
+			roundDone[round] = true
+			wins[e.PlayerID]++
+		case "FATALITY":
+			if wins[e.PlayerID] < rounds/2+1 {
+				t.Fatalf("%s: FATALITY de %s, que no ganó la pelea", m.ID, e.PlayerID)
+			}
+			finished = true
+		}
+	}
+	if joined != 2 {
+		t.Fatalf("%s: %d luchadores", m.ID, joined)
+	}
+	if wins["p1"] < rounds/2+1 && wins["p2"] < rounds/2+1 {
+		t.Fatalf("%s: nadie ganó la pelea (rounds ganados %v de %d)", m.ID, wins, rounds)
+	}
+}
+
+// Entre muchas peleas al azar aparecen todas las acciones de fighting del
+// catálogo.
+func TestFightingUsesAllActions(t *testing.T) {
+	used := map[string]bool{}
+	for seed := int64(1); seed <= 50; seed++ {
+		for _, m := range Generate(seed, Counts{Fighting: 3}) {
+			if m.Script != "" {
+				continue
+			}
+			for _, e := range m.Events {
+				used[e.Action] = true
+			}
+		}
+	}
+	for action := range validation.GameActions["fighting"] {
+		if !used[action] {
+			t.Errorf("ninguna pelea al azar usó %s", action)
 		}
 	}
 }
@@ -326,7 +431,7 @@ func TestSend(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	matches := Generate(42, 2, 2)
+	matches := Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2})
 	results := Send(srv.URL, matches)
 
 	for i, m := range matches {

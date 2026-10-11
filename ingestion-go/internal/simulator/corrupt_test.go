@@ -10,8 +10,8 @@ import (
 )
 
 func TestCorrupt(t *testing.T) {
-	clean := Generate(42, 3, 3)
-	matches := Generate(42, 3, 3)
+	clean := Generate(42, Counts{Racing: 3, Football: 3, Fighting: 3})
+	matches := Generate(42, Counts{Racing: 3, Football: 3, Fighting: 3})
 	n := Corrupt(matches, 42, 20)
 	if n == 0 {
 		t.Fatal("con 20 % se esperaban eventos dañados")
@@ -49,7 +49,7 @@ func TestCorrupt(t *testing.T) {
 }
 
 func TestCorruptDeterministic(t *testing.T) {
-	a, b := Generate(42, 3, 3), Generate(42, 3, 3)
+	a, b := Generate(42, Counts{Racing: 3, Football: 3, Fighting: 3}), Generate(42, Counts{Racing: 3, Football: 3, Fighting: 3})
 	Corrupt(a, 42, 10)
 	Corrupt(b, 42, 10)
 	if !reflect.DeepEqual(a, b) {
@@ -58,11 +58,11 @@ func TestCorruptDeterministic(t *testing.T) {
 }
 
 func TestCorruptPercentLimits(t *testing.T) {
-	if n := Corrupt(Generate(42, 2, 2), 42, 0); n != 0 {
+	if n := Corrupt(Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2}), 42, 0); n != 0 {
 		t.Fatalf("con 0 %% se dañaron %d eventos", n)
 	}
 
-	matches := Generate(42, 2, 2)
+	matches := Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2})
 	eligible := 0
 	for _, m := range matches {
 		if m.Script == "" {
@@ -77,7 +77,7 @@ func TestCorruptPercentLimits(t *testing.T) {
 // Todas las formas de dañar producen un evento inválido, en ambos juegos y
 // partiendo de cualquier tipo de evento.
 func TestDamageAlwaysInvalid(t *testing.T) {
-	for _, m := range Generate(1, 3, 3) {
+	for _, m := range Generate(1, Counts{Racing: 3, Football: 3, Fighting: 3}) {
 		for _, e := range m.Events {
 			for k := 0; k < 20; k++ {
 				r := rand.New(rand.NewSource(int64(k)))

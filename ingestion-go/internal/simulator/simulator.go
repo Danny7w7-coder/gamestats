@@ -34,20 +34,30 @@ type Match struct {
 	Script string // descripción si es un escenario guionizado; vacío si es aleatoria
 }
 
+// Counts dice cuántas partidas aleatorias generar de cada juego.
+type Counts struct {
+	Racing, Football, Fighting int
+}
+
 // Generate crea los escenarios guionizados (siempre) y las partidas
 // aleatorias de cada juego a partir de la semilla.
-func Generate(seed int64, racing, football int) []Match {
+func Generate(seed int64, n Counts) []Match {
 	r := rand.New(rand.NewSource(seed))
 	matches := scriptedMatches(seed)
-	for i := 1; i <= racing; i++ {
+	for i := 1; i <= n.Racing; i++ {
 		id := fmt.Sprintf("race-s%d-%03d", seed, i)
 		start := baseTime.Add(time.Duration(i) * 15 * time.Minute)
 		matches = append(matches, generateRacing(r, id, start))
 	}
-	for i := 1; i <= football; i++ {
+	for i := 1; i <= n.Football; i++ {
 		id := fmt.Sprintf("foot-s%d-%03d", seed, i)
 		start := baseTime.Add(time.Duration(i) * 2 * time.Hour)
 		matches = append(matches, generateFootball(r, id, start))
+	}
+	for i := 1; i <= n.Fighting; i++ {
+		id := fmt.Sprintf("fight-s%d-%03d", seed, i)
+		start := baseTime.Add(time.Duration(i) * 10 * time.Minute)
+		matches = append(matches, generateFighting(r, id, start))
 	}
 	return matches
 }

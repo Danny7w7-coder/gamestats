@@ -9,26 +9,23 @@ import (
 	"gamestats/ingestion/internal/validation"
 )
 
-// scriptedByName devuelve los escenarios de la semilla 42 por nombre
-// ("comeback", "penalty", ...), separados por juego.
-func scriptedByName(t *testing.T) (racing, football map[string]Match) {
+// scriptedFor devuelve los escenarios de la semilla 42 de un juego, por
+// nombre ("comeback", "penalty", ...).
+func scriptedFor(t *testing.T, gameID string) map[string]Match {
 	t.Helper()
-	racing, football = map[string]Match{}, map[string]Match{}
-	for _, m := range Generate(42, 0, 0) {
-		name := m.ID[strings.LastIndex(m.ID, "-")+1:]
-		if m.GameID == "racing" {
-			racing[name] = m
-		} else {
-			football[name] = m
+	byName := map[string]Match{}
+	for _, m := range Generate(42, Counts{}) {
+		if m.GameID == gameID {
+			byName[m.ID[strings.LastIndex(m.ID, "-")+1:]] = m
 		}
 	}
-	return racing, football
+	return byName
 }
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
-	ms := Generate(42, 0, 0)
-	if len(ms) != 9 {
-		t.Fatalf("escenarios = %d, se esperaban 9", len(ms))
+	ms := Generate(42, Counts{})
+	if len(ms) != 11 {
+		t.Fatalf("escenarios = %d, se esperaban 11", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -36,14 +33,14 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, 2, 3)); got != 9+2+3 {
-		t.Fatalf("partidas = %d, se esperaban 14", got)
+	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1})); got != 11+2+3+1 {
+		t.Fatalf("partidas = %d, se esperaban 17", got)
 	}
 }
 
 // El contenido del guion no depende de la semilla (solo cambian los ids).
 func TestScriptedIndependentOfSeed(t *testing.T) {
-	a, b := Generate(1, 0, 0), Generate(99, 0, 0)
+	a, b := Generate(1, Counts{}), Generate(99, Counts{})
 	for i := range a {
 		if len(a[i].Events) != len(b[i].Events) {
 			t.Fatalf("%s y %s tienen distinta cantidad de eventos", a[i].ID, b[i].ID)
@@ -79,7 +76,7 @@ func finalRanking(t *testing.T, m Match) []any {
 }
 
 func TestScriptedRacing(t *testing.T) {
-	racing, _ := scriptedByName(t)
+	racing := scriptedFor(t, "racing")
 
 	// Remontada: p4 último en la vuelta 1 y primero al final.
 	cb := racing["comeback"]
@@ -227,7 +224,7 @@ func summarize(t *testing.T, m Match) footballSummary {
 }
 
 func TestScriptedFootball(t *testing.T) {
-	_, football := scriptedByName(t)
+	football := scriptedFor(t, "football")
 
 	cb := summarize(t, football["comeback"])
 	if !reflect.DeepEqual(cb.scoreTimeline, []string{"0-1", "1-1", "2-1"}) {
@@ -286,5 +283,60 @@ func TestScriptedFootball(t *testing.T) {
 		if !paused {
 			t.Errorf("%s: sin entretiempo", name)
 		}
+	}
+}
+
+// roundResults devuelve, en orden, el ganador y la vida restante de cada round.
+func roundResults(t *testing.T, m Match) (winners []string, health []int) {
+	t.Helper()
+	for _, e := range m.Events {
+		if e.Action == "ROUND_WON" {
+			winners = append(winners, e.PlayerID)
+			health = append(health, int(data(t, e)["remainingHealth"].(float64)))
+		}
+	}
+	return winners, health
+}
+
+func TestScriptedFighting(t *testing.T) {
+	fighting := scriptedFor(t, "fighting")
+
+	// Flawless + fatality: p1 gana 2-0, el round 1 con vida 100 y el 2 con 25,
+	// y la última acción es su FATALITY. Usa las 10 acciones.
+	fl := fighting["flawless"]
+	winners, health := roundResults(t, fl)
+	if !reflect.DeepEqual(winners, []string{"p1", "p1"}) || !reflect.DeepEqual(health, []int{100, 25}) {
+		t.Errorf("flawless: ganadores %v con vida %v", winners, health)
+	}
+	last := fl.Events[len(fl.Events)-2] // el último es MATCH_FINISHED
+	if last.Action != "FATALITY" || last.PlayerID != "p1" {
+		t.Errorf("flawless: la última acción es %s de %s", last.Action, last.PlayerID)
+	}
+	used := map[string]bool{}
+	for _, e := range fl.Events {
+		used[e.Action] = true
+	}
+	for action := range validation.GameActions["fighting"] {
+		if !used[action] {
+			t.Errorf("flawless: no usa %s", action)
+		}
+	}
+
+	// Remontada: p1 gana el round 1 por tiempo y p2 los rounds 2 y 3; hay una
+	// pausa y no hay fatality.
+	cb := fighting["comeback"]
+	winners, health = roundResults(t, cb)
+	if !reflect.DeepEqual(winners, []string{"p1", "p2", "p2"}) || !reflect.DeepEqual(health, []int{60, 90, 25}) {
+		t.Errorf("comeback: ganadores %v con vida %v", winners, health)
+	}
+	paused := false
+	for _, e := range cb.Events {
+		paused = paused || e.Type == "MATCH_PAUSED"
+		if e.Action == "FATALITY" {
+			t.Errorf("comeback: no debería tener fatality")
+		}
+	}
+	if !paused {
+		t.Errorf("comeback: sin pausa")
 	}
 }
