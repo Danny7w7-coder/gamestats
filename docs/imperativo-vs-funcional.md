@@ -179,7 +179,7 @@ En Scala sería algo como `events.flatMap(_.playerId).distinct.sorted`. Lo mismo
 
 - **Timestamps.** `"…:22Z"` y `"…:22.000Z"` son el mismo instante, pero como texto no son iguales. Para ordenar hubo que comparar valores `time.Time`. Además, en el struct `Timestamp` es un `string` y no un `time.Time`: así un timestamp mal escrito no hace fallar el decode de todo el lote, y la validación rechaza solo ese evento.
 - **El evento tardío.** Decidir dónde detectar un evento que llega después de `MATCH_FINISHED` llevó a que `Submit` espere una respuesta del router por un canal `reply` con buffer de 1. Solo el router conoce el orden real de llegada, y así la respuesta HTTP puede informar el rechazo con exactitud.
-- **Determinismo del simulador.** En Go, el orden en que se recorre un `map` es aleatorio a propósito. Para que la misma semilla genere siempre las mismas partidas, el simulador elige los jugadores de slices y no de maps, y no usa `time.Now()` ni el generador aleatorio global.
+- **Determinismo del simulador.** En Go, el orden en que se recorre un `map` es aleatorio a propósito. Para que la misma semilla genere siempre las mismas partidas, el simulador elige los jugadores de slices y no de maps, y no usa `time.Now()` ni el generador aleatorio global. Cuando sí hace falta recorrer un map, como el catálogo `GameActions` para elegir una acción de otro juego, primero se pasa a un slice y se ordena.
 - **PowerShell 5.1** agrega una marca BOM al inicio de los archivos UTF-8 que genera, y `encoding/json` no la acepta. El handler la quita antes de decodificar.
 
 #### 5. Todo vive en memoria

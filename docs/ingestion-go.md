@@ -7,6 +7,7 @@ El módulo `ingestion-go/` es la puerta de entrada de GameStats. Recibe los even
 Go **no calcula estadísticas**: esa parte es de Scala. Tampoco interpreta el campo `data` de los eventos, que se reenvía intacto.
 
 - [Qué hace](#qué-hace)
+- [Juegos](#juegos)
 - [Cómo correrlo](#cómo-correrlo)
 - [Endpoints](#endpoints)
 - [Validación](#validación)
@@ -27,9 +28,24 @@ Go **no calcula estadísticas**: esa parte es de Scala. Tampoco interpreta el ca
 5. **Arma el lote** cuando llega `MATCH_FINISHED`: ordena los eventos por `timestamp` y calcula `startedAt`, `finishedAt` y `players`.
 6. **Envía el lote a Scala** con reintentos. La partida queda como `enviada` o `error_envio`.
 
-Además incluye un **simulador** (`cmd/simulator`) que genera partidas realistas de racing y football y las manda al servidor, para probar el sistema completo.
+Además incluye un **simulador** (`cmd/simulator`) que genera partidas realistas de los 4 juegos (racing, football, fighting y tetris) y las manda al servidor, para probar el sistema completo.
 
 Solo usa la librería estándar de Go (`net/http`, `encoding/json`, `sync`, `sort`, `time`, `math/rand`, `flag`). No tiene dependencias externas.
+
+## Juegos
+
+GameStats trabaja con 4 juegos. Cada uno tiene un juego de referencia para que se entienda su lógica:
+
+| `gameId` | Referencia | Acciones (`PLAYER_ACTION`) | Eventos en total |
+|---|---|---|---|
+| `racing` | Mario Kart (carrera arcade) | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED`, `ITEM_PICKUP`, `ITEM_USED`, `DRIFT`, `COLLISION`, `SPIN`, `RESPAWN`, `PENALTY`, `DNF` (12) | 20 |
+| `football` | Fútbol arcade retro 6 vs 6 | `PASS`, `SHOT`, `POWER_SHOT`, `GOAL`, `OWN_GOAL`, `SAVE`, `TACKLE`, `INTERCEPTION`, `DRIBBLE`, `FOUL`, `CORNER` (11) | 19 |
+| `fighting` | Mortal Kombat (versión simple) | `ATTACK`, `SPECIAL_MOVE`, `COMBO`, `THROW`, `BLOCK`, `COMBO_BREAKER`, `KNOCKDOWN`, `FATAL_BLOW`, `ROUND_WON`, `FATALITY` (10) | 18 |
+| `tetris` | Tetris clásico de un jugador | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED`, `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR`, `LEVEL_UP`, `STACK_HEIGHT`, `TOP_OUT` (13) | 21 |
+
+Además de sus acciones, los 4 juegos comparten 8 tipos generales: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED` y `PLAYER_RECONNECTED`. En total son 54 eventos distintos (8 generales y 46 acciones), y ninguna acción se repite entre juegos.
+
+El catálogo lo define el contrato compartido con Scala ([`contracts/README.md`](../contracts/README.md)). El `data` exacto de cada acción está en `contracts/event.schema.json`. En Go, los juegos y sus acciones se declaran en un solo lugar: `GameActions`, en `internal/validation/catalog.go`.
 
 ## Cómo correrlo
 
@@ -131,12 +147,12 @@ Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED
 | 1 | Tiene `eventId`, `timestamp`, `gameId`, `gameVersion`, `matchId` y `type` | `falta el campo matchId` |
 | 2 | `timestamp` en RFC 3339 | `timestamp no está en formato RFC 3339: "ayer a las 2"` |
 | 3 | `gameId` existe en el catálogo | `gameId desconocido: "chess"` |
-| 4 | `type` es uno de los 7 tipos conocidos | `type desconocido: "PLAYER_DANCED"` |
-| 5 | Tiene `playerId`, salvo en `MATCH_STARTED` y `MATCH_FINISHED` | `falta el campo playerId (obligatorio en PLAYER_LEFT)` |
+| 4 | `type` es uno de los 9 tipos conocidos (los 8 generales y `PLAYER_ACTION`) | `type desconocido: "PLAYER_DANCED"` |
+| 5 | Tiene `playerId`, salvo en los eventos de la partida completa: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED` y `MATCH_RESUMED` | `falta el campo playerId (obligatorio en PLAYER_LEFT)` |
 | 6 | En `PLAYER_ACTION`, `action` existe en el catálogo **de ese juego** | `la acción "LAP_COMPLETED" no existe en el juego "football"` |
 | 7 | `action` solo aparece en `PLAYER_ACTION` (acordado con Danny en el contrato) | `action solo se permite en PLAYER_ACTION (llegó en PLAYER_JOINED)` |
 
-Hay dos motivos de rechazo más, que no vienen de `Validate`:
+Hay tres motivos de rechazo más, que no vienen de `Validate`:
 
 - **Formato:** el evento no se puede decodificar, por ejemplo `"timestamp": 5`. Se rechaza ese evento y los demás siguen.
 - **Partida ya finalizada:** llega un evento de una partida que ya recibió `MATCH_FINISHED`. Su lote ya se armó, así que el evento se rechaza (ver [Concurrencia](#concurrencia)).
@@ -144,7 +160,9 @@ Hay dos motivos de rechazo más, que no vienen de `Validate`:
 
 Go **no** revisa el contenido de `data`. Esa división de responsabilidades está acordada con Scala en [`contracts/README.md` → "Quién valida qué"](../contracts/README.md#quién-valida-qué):
 
-> **Go** valida cada evento al recibirlo y rechaza solo ese evento [...] Go **no** revisa `data`. [...] **Scala** rechaza el lote completo (`400`) solo por errores del lote [...] Si una acción conocida trae `data` mal formada, Scala **descarta ese evento**.
+> **Go** valida cada evento al recibirlo y rechaza solo ese evento [...] Go **no** revisa `data`. [...] **Scala** rechaza el lote completo (`400`) solo por errores del lote [...] Si una acción conocida trae `data` mal formada o rompe una validación de contexto, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual.
+
+Las validaciones de contexto son reglas que dependen de otros eventos de la partida. Por ejemplo: en racing no se puede agarrar un objeto con la mano llena, en fighting la `FATALITY` solo la hace el ganador, y en ningún juego hay acciones durante una pausa. Go no las revisa porque para eso tendría que entender cada juego. Por eso los fixtures `*_invalid_events.json` de Danny pasan completos la validación de Go: sus eventos `bad-*` los descarta Scala.
 
 ### Log de rechazados
 
@@ -289,36 +307,83 @@ Mientras un sender espera un reintento, los otros `WORKERS - 1` siguen enviando 
 `cmd/simulator` simula la fuente externa de eventos.
 
 ```powershell
-go run ./cmd/simulator -racing 4 -football 4 -seed 42 -corrupt 3 -target http://localhost:8080
+go run ./cmd/simulator -racing 4 -football 4 -fighting 4 -tetris 4 -seed 42 -corrupt 3 -target http://localhost:8080
 ```
 
 | Opción | Por defecto | Qué hace |
 |---|---|---|
 | `-racing N` | `4` | Partidas aleatorias de racing (además de las guionizadas) |
-| `-football N` | `4` | Partidas aleatorias de football (además de las guionizadas) |
+| `-football N` | `4` | Partidas aleatorias de football |
+| `-fighting N` | `4` | Peleas aleatorias de fighting |
+| `-tetris N` | `4` | Partidas aleatorias de tetris |
 | `-seed S` | `42` | Semilla. La misma semilla genera exactamente las mismas partidas |
 | `-corrupt P` | `3` | Porcentaje de eventos a los que se les agrega una copia dañada a propósito |
 | `-target URL` | `http://localhost:8080` | Servidor de ingestión (en Docker: `http://ingestion:8080`) |
 
-- **Determinista:** todo sale de un solo `rand.New(rand.NewSource(seed))` y de una fecha base fija. No se usa `time.Now()` ni el `rand` global. Los `matchId` llevan la semilla (`race-s42-001`) para poder correr varias semillas contra el mismo servidor.
+- **Determinista:** todo sale de un solo `rand.New(rand.NewSource(seed))` y de una fecha base fija. No se usa `time.Now()` ni el `rand` global, y los jugadores se eligen de slices y no de maps, porque en Go el orden en que se recorre un map es aleatorio. Los `matchId` llevan la semilla (`race-s42-001`) para poder correr varias semillas contra el mismo servidor.
 - **Concurrente:** cada partida se envía en su propia goroutine, en grupos de 5 eventos, para que los eventos de distintas partidas lleguen mezclados.
-- **Racing:** de 3 a 6 pilotos y de 3 a 5 vueltas. Cada piloto tiene un ritmo base con variación por vuelta, la posición se calcula con el tiempo acumulado y hay penalizaciones ocasionales.
-- **Football:** equipos `A` y `B`, con pases, tiros, goles y faltas con tarjetas. Respeta las reglas acordadas con Danny: todo `GOAL` va precedido de un `SHOT` a puerta del mismo jugador, no hay autogoles y un jugador con tarjeta roja no genera más eventos.
-- **Eventos dañados:** se agregan como **copias** con `eventId` terminado en `-bad`, cada una rompiendo una regla de validación. Se usan copias para que la partida original siga completa: si se dañara un `SHOT`, Scala recibiría un `GOAL` sin su tiro.
+- **Eventos dañados:** se agregan como **copias** con `eventId` terminado en `-bad`, cada una rompiendo una regla de validación. Se usan copias para que la partida original siga completa: si se dañara un `SHOT`, Scala recibiría un `GOAL` sin su tiro. Para la regla 6 se elige una acción del catálogo que pertenece a **otro** juego (por ejemplo `CORNER` en tetris).
+
+### Cómo se genera cada juego
+
+Cada juego tiene un tipo que escribe la partida evento por evento y lleva el estado necesario para que los datos sean coherentes. Lo usan tanto las partidas aleatorias como los escenarios guionizados.
+
+| Juego | Archivo | Cómo funciona |
+|---|---|---|
+| Racing | `racing.go` | Una carrera se describe con un `racePlan` (tiempos de vuelta, acciones, penalizaciones, abandono, pausa) y `buildRace` la convierte en eventos. Las posiciones se calculan con el tiempo acumulado más las penalizaciones. Los adelantamientos (`OVERTAKE`) y las vueltas de ventaja (`LAPPED`) salen de comparar tiempos. De 3 a 6 pilotos y de 3 a 5 vueltas. |
+| Football | `football.go` | `footballGame`: siempre 6 vs 6 (A: p1 portero y p2–p6; B: p7 portero y p8–p12), con entretiempo de 15 minutos como pausa. Unas 60 jugadas por partido y marcador bajo (~1.6 goles). |
+| Fighting | `fighting.go` | `fightGame` lleva la vida de cada luchador, así `remainingHealth` y el `health` del `FATAL_BLOW` coinciden con el daño recibido. Al mejor de 1, 3 o 5 rounds, que se ganan por KO o por tiempo, entre 6 personajes con sus especiales y su fatality. |
+| Tetris | `tetris.go` | `tetrisGame` no simula el tablero celda por celda: lleva la altura de la pila, las líneas, el nivel, el combo y el back-to-back. Con eso salen solos los puntos, `LEVEL_UP` (cada 10 líneas), `ALL_CLEAR` (la pila queda en 0) y `TOP_OUT` (la pila llega a 20). Un solo jugador. |
+
+### Reglas que respeta
+
+Scala descarta los eventos que rompen una validación de contexto. El simulador las cumple **por construcción**, sin generar eventos para después filtrarlos:
+
+- **Todos los juegos:** ninguna acción cae dentro de una pausa (el reloj se corre lo que dura la pausa) y toda referencia a otro jugador (`targetId`, `otherId`, `assistId`, ...) es a otro jugador de la partida.
+- **Racing:**
+  - Cada objeto se agarra y se usa en la misma vuelta, así nunca hay dos en la mano. El nitro lleva `durationMs`.
+  - `RESPAWN` va justo después de un choque o trompo del mismo piloto.
+  - Después de un `DNF` no hay más eventos de ese piloto, y no aparece en el `ranking`.
+- **Football:**
+  - Todo `GOAL` va 2 s después de un `SHOT` o `POWER_SHOT` al arco del mismo jugador.
+  - El expulsado con roja no vuelve a aparecer.
+  - Los porteros solo atajan (`SAVE`), así siempre hay quien ataje.
+  - El `OWN_GOAL` lleva el `teamId` de quien lo hace.
+- **Fighting:**
+  - Un golpe fallado lleva `damage: 0`.
+  - `COMBO_BREAKER` va justo después del combo del rival.
+  - `FATAL_BLOW` solo con la vida en 30 o menos y una vez por luchador.
+  - Hay un `ROUND_WON` por round, y la `FATALITY` es del ganador y es la última acción.
+- **Tetris:**
+  - Un solo jugador.
+  - `LEVEL_UP` solo cuando el nivel sube.
+  - Nada después de `TOP_OUT`.
+
+Los tests del simulador (`simulator_test.go`) vuelven a revisar todas estas reglas en 50 semillas distintas. También comprueban que las partidas aleatorias de cada juego usan **todas** las acciones de su catálogo. Contra el Scala real, `go run ./cmd/simulator -seed 42` manda 29 partidas: los 54 eventos dañados los rechaza Go y Scala no descarta ninguno de los demás.
 
 ### Escenarios guionizados
 
-Se generan siempre y no dependen del azar. Sirven para probar las reglas de Scala y para la demo:
+Se generan siempre y no dependen del azar. Sirven para probar las reglas de Scala y para la demo. Hay al menos un escenario por cada patrón que detecta Scala:
 
-| Escenario (seed 42) | Qué prueba |
-|---|---|
-| `race-s42-comeback` | Remontada: p4 sale último y gana |
-| `race-s42-penalty` | p1 es el más rápido en pista, pero una penalización de 5 s le hace perder |
-| `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1; tarjeta roja a p6; gol de p2 sin asistencia |
-| `foot-s42-draw` | Empate 1-1; p3 y p6 no tiran al arco |
-| `foot-s42-hattrick` | Hat-trick de p1; A gana 3-1 |
+| Escenario (seed 42) | Qué muestra | Patrones en Scala |
+|---|---|---|
+| `race-s42-comeback` | p4 sale último y gana | COMEBACK, CLEAN_RACE |
+| `race-s42-penalty` | p1 es el más rápido en pista, pero una penalización de 5 s le hace perder | CLEAN_RACE (de p2) |
+| `race-s42-clean` | p1 gana sin choques ni penalizaciones; los demás sí los tienen | CLEAN_RACE |
+| `race-s42-items` | p2 usa nitro, escudo y aceite; p4 recibe una vuelta (`LAPPED`) | ITEM_MASTER, CLEAN_RACE |
+| `race-s42-dnf` | p3 choca y abandona (`DNF`); la carrera se pausa para limpiar la pista; p2 gana desde el 3° lugar | COMEBACK, CLEAN_RACE |
+| `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1; roja a p12; gol de p3 sin asistencia | COMEBACK |
+| `foot-s42-draw` | Empate 1-1 (sin ganador); p4 y p10 no tiran al arco | ninguno |
+| `foot-s42-hattrick` | Hat-trick de p4 (uno de tiro potente); A gana 3-1 | HAT_TRICK |
+| `foot-s42-cleansheet` | A gana 3-0 con autogol de p10, tiro potente de p5 y 2 atajadas de p1; usa las 11 acciones | CLEAN_SHEET |
+| `fight-s42-flawless` | p1 gana el round 1 sin recibir daño y remata con una fatality; usa las 10 acciones | FLAWLESS_VICTORY, FATALITY |
+| `fight-s42-comeback` | p1 gana el round 1 por tiempo y p2 gana los rounds 2 y 3 | COMEBACK |
+| `tetris-s42-b2b` | Dos tetris seguidos (con `HOLD`) y subida al nivel 2 | BACK_TO_BACK |
+| `tetris-s42-perfect` | 3 T-spins y un tetris que deja el tablero vacío, con pausa | PERFECT_CLEAR, T_SPIN_MASTER |
 
-Con la configuración por defecto se generan 13 partidas: 5 guionizadas, 4 de racing y 4 de football.
+La columna de patrones es lo que devolvió el Scala real para cada escenario. Todos los partidos de football tienen el entretiempo como pausa.
+
+Con la configuración por defecto se generan 29 partidas: 13 guionizadas y 4 aleatorias de cada juego.
 
 ## Agregar un juego nuevo
 
@@ -326,13 +391,17 @@ Para la ingestión basta con **editar un solo lugar**, el catálogo de `internal
 
 ```go
 var GameActions = map[string]map[string]bool{
-    "racing":   {"LAP_COMPLETED": true, "POSITION_CHANGED": true, "PENALTY": true},
-    "football": {"PASS": true, "SHOT": true, "GOAL": true, "FOUL": true},
+    "racing":   {"LAP_COMPLETED": true, "POSITION_CHANGED": true, /* ... */},
+    "football": {"PASS": true, "SHOT": true, /* ... */},
+    "fighting": {"ATTACK": true, "COMBO": true, /* ... */},
+    "tetris":   {"PIECE_SPAWNED": true, "LINES_CLEARED": true, /* ... */},
     "tennis":   {"SERVE": true, "POINT_WON": true}, // juego nuevo
 }
 ```
 
-Nada más cambia en Go: la validación lee el catálogo, el pipeline agrupa por `matchId` sin importar el juego, y `data` se reenvía sin interpretarlo. Para generar partidas del juego nuevo habría que agregar su generador al simulador. Del lado de Scala, el juego necesita su propio analizador (ver el [README principal](../README.md#agregar-un-juego-nuevo)).
+Nada más cambia en Go: la validación lee el catálogo, el pipeline agrupa por `matchId` sin importar el juego, y `data` se reenvía sin interpretarlo. Así se agregaron `fighting` y `tetris`: en el servidor solo cambió `catalog.go`, y el handler, el pipeline, el store y el cliente de Scala quedaron igual.
+
+Para que el simulador genere partidas del juego nuevo hay que agregar su generador (un archivo como `tetris.go`), un campo en `simulator.Counts` y una opción en `cmd/simulator/main.go`. Del lado de Scala, el juego necesita su propio analizador (ver el [README principal](../README.md#agregar-un-juego-nuevo)).
 
 ## Estructura del código
 
@@ -350,7 +419,7 @@ ingestion-go/
 │   ├── client/scala_client.go   POST /analyze con reintentos
 │   ├── config/config.go         variables de entorno
 │   ├── rejected/log.go          rejected.jsonl (sync.Mutex)
-│   └── simulator/               generadores de racing y football, escenarios, eventos dañados
+│   └── simulator/               generadores de los 4 juegos, escenarios, eventos dañados
 ├── testdata/invalid_events.json un evento inválido por regla, para los tests
 └── Dockerfile                   imagen con los dos programas (/app/ingestion y /app/simulator)
 ```
