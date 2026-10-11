@@ -25,8 +25,8 @@ func scriptedByName(t *testing.T) (racing, football map[string]Match) {
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
 	ms := Generate(42, 0, 0)
-	if len(ms) != 5 {
-		t.Fatalf("escenarios = %d, se esperaban 5", len(ms))
+	if len(ms) != 8 {
+		t.Fatalf("escenarios = %d, se esperaban 8", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -34,8 +34,8 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, 2, 3)); got != 5+2+3 {
-		t.Fatalf("partidas = %d, se esperaban 10", got)
+	if got := len(Generate(42, 2, 3)); got != 8+2+3 {
+		t.Fatalf("partidas = %d, se esperaban 13", got)
 	}
 }
 
@@ -105,6 +105,63 @@ func TestScriptedRacing(t *testing.T) {
 	}
 	if got := finalRanking(t, pen); !reflect.DeepEqual(got, []any{"p2", "p1", "p3"}) {
 		t.Fatalf("penalty: ranking = %v", got)
+	}
+
+	// Carrera limpia: el ganador no tiene choques (ni hechos ni recibidos) ni
+	// penalizaciones, pero en la carrera sí hubo de ambos.
+	clean := racing["clean"]
+	winner := finalRanking(t, clean)[0]
+	collisions, penalties := 0, 0
+	for _, e := range clean.Events {
+		switch e.Action {
+		case "COLLISION":
+			collisions++
+			if e.PlayerID == winner || data(t, e)["otherId"] == winner {
+				t.Fatalf("clean: el ganador %v estuvo en el choque %s", winner, e.EventID)
+			}
+		case "PENALTY":
+			penalties++
+			if e.PlayerID == winner {
+				t.Fatalf("clean: el ganador %v tiene una penalización", winner)
+			}
+		}
+	}
+	if winner != "p1" || collisions == 0 || penalties == 0 {
+		t.Fatalf("clean: ganador=%v choques=%d penalizaciones=%d", winner, collisions, penalties)
+	}
+
+	// Item master: p2 usa los 3 objetos y gana; alguien le saca una vuelta a p4.
+	items := racing["items"]
+	usedBy := map[string]map[any]bool{}
+	lappedP4 := false
+	for _, e := range items.Events {
+		switch e.Action {
+		case "ITEM_USED":
+			if usedBy[e.PlayerID] == nil {
+				usedBy[e.PlayerID] = map[any]bool{}
+			}
+			usedBy[e.PlayerID][data(t, e)["item"]] = true
+		case "LAPPED":
+			lappedP4 = lappedP4 || data(t, e)["lappedId"] == "p4"
+		}
+	}
+	if got := finalRanking(t, items); len(usedBy["p2"]) != 3 || !lappedP4 || !reflect.DeepEqual(got, []any{"p2", "p1", "p3", "p4"}) {
+		t.Fatalf("items: objetos de p2=%v, p4 doblado=%v, ranking=%v", usedBy["p2"], lappedP4, got)
+	}
+
+	// Pausa y abandono: hay pausa, p3 abandona y no está en el ranking.
+	dnf := racing["dnf"]
+	hasPause, dnfBy := false, ""
+	for _, e := range dnf.Events {
+		if e.Type == "MATCH_PAUSED" {
+			hasPause = true
+		}
+		if e.Action == "DNF" {
+			dnfBy = e.PlayerID
+		}
+	}
+	if got := finalRanking(t, dnf); !hasPause || dnfBy != "p3" || !reflect.DeepEqual(got, []any{"p2", "p1", "p4"}) {
+		t.Fatalf("dnf: pausa=%v DNF de %q ranking=%v", hasPause, dnfBy, got)
 	}
 }
 

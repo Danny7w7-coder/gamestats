@@ -39,11 +39,25 @@ func TestGeneratedMatchesFollowTheRules(t *testing.T) {
 	}
 }
 
+// refKeys son los campos de data que nombran a otro jugador de la partida.
+var refKeys = []string{"targetId", "overtakenId", "otherId", "lappedId", "attackerId", "assistId"}
+
 // checkCommon: todos válidos, ids únicos, timestamps en orden, empieza con
-// MATCH_STARTED y termina con MATCH_FINISHED.
+// MATCH_STARTED y termina con MATCH_FINISHED. Además, las reglas de contexto
+// de todos los juegos: pausas bien formadas, ninguna acción durante una
+// pausa, y toda referencia a otro jugador es a alguien de la partida
+// distinto del que hace la acción.
 func checkCommon(t *testing.T, m Match) {
 	t.Helper()
+	players := map[string]bool{}
+	for _, e := range m.Events {
+		if e.PlayerID != "" {
+			players[e.PlayerID] = true
+		}
+	}
+
 	seen := map[string]bool{}
+	paused := false
 	var prev time.Time
 	for i, e := range m.Events {
 		if err := validation.Validate(e); err != nil {
@@ -58,6 +72,29 @@ func checkCommon(t *testing.T, m Match) {
 			t.Fatalf("%s: %s está fuera de orden", m.ID, e.EventID)
 		}
 		prev = ts
+
+		switch e.Type {
+		case "MATCH_PAUSED":
+			if paused {
+				t.Fatalf("%s: %s pausa una partida ya pausada", m.ID, e.EventID)
+			}
+			paused = true
+		case "MATCH_RESUMED":
+			if !paused {
+				t.Fatalf("%s: %s reanuda sin una pausa antes", m.ID, e.EventID)
+			}
+			paused = false
+		case "PLAYER_ACTION":
+			if paused {
+				t.Fatalf("%s: %s es una acción durante la pausa", m.ID, e.EventID)
+			}
+			d := data(t, e)
+			for _, k := range refKeys {
+				if ref, ok := d[k]; ok && (ref == e.PlayerID || !players[ref.(string)]) {
+					t.Fatalf("%s: %s tiene %s=%v inválido", m.ID, e.EventID, k, ref)
+				}
+			}
+		}
 	}
 	if first, last := m.Events[0], m.Events[len(m.Events)-1]; first.Type != "MATCH_STARTED" || last.Type != "MATCH_FINISHED" {
 		t.Fatalf("%s: empieza con %s y termina con %s", m.ID, first.Type, last.Type)
@@ -73,6 +110,10 @@ func data(t *testing.T, e model.Event) map[string]any {
 	return d
 }
 
+// checkRacing revisa las reglas de contexto de racing (las mismas que
+// aplica Scala): vueltas dentro del total, from ≠ to, un objeto a la vez,
+// RESPAWN solo tras un choque o trompo propio en esa vuelta, nada después de
+// un DNF y el que abandona no va en el ranking.
 func checkRacing(t *testing.T, m Match) {
 	t.Helper()
 	start := data(t, m.Events[0])
@@ -81,24 +122,97 @@ func checkRacing(t *testing.T, m Match) {
 		t.Fatalf("%s: MATCH_STARTED con data %v", m.ID, start)
 	}
 
-	drivers, lapEvents := 0, 0
+	drivers := 0
+	hand := map[string]string{}  // objeto que tiene cada piloto en la mano
+	incident := map[string]int{} // vuelta del último choque o trompo sin RESPAWN
+	out := map[string]bool{}     // pilotos que abandonaron
+	lapsDone := map[string]int{} // LAP_COMPLETED de cada piloto
+
 	for _, e := range m.Events {
-		switch {
-		case e.Type == "PLAYER_JOINED":
+		p := e.PlayerID
+		if out[p] {
+			t.Fatalf("%s: %s es de %s después de su DNF", m.ID, e.EventID, p)
+		}
+		if e.Type == "PLAYER_JOINED" {
 			drivers++
-		case e.Action == "LAP_COMPLETED":
-			lapEvents++
+		}
+		if e.Type != "PLAYER_ACTION" {
+			continue
+		}
+		d := data(t, e)
+		lap := 0
+		if l, ok := d["lap"]; ok {
+			lap = int(l.(float64))
+			if lap < 1 || lap > laps {
+				t.Fatalf("%s: %s en la vuelta %d de %d", m.ID, e.EventID, lap, laps)
+			}
+		}
+
+		switch e.Action {
+		case "POSITION_CHANGED":
+			if d["from"] == d["to"] {
+				t.Fatalf("%s: %s con from = to", m.ID, e.EventID)
+			}
+		case "ITEM_PICKUP":
+			if hand[p] != "" {
+				t.Fatalf("%s: %s agarra un objeto con %s en la mano", m.ID, e.EventID, hand[p])
+			}
+			hand[p] = d["item"].(string)
+		case "ITEM_USED":
+			if hand[p] != d["item"] {
+				t.Fatalf("%s: %s usa %v pero tiene %q", m.ID, e.EventID, d["item"], hand[p])
+			}
+			if _, ok := d["durationMs"]; d["item"] == "boost" && !ok {
+				t.Fatalf("%s: %s es un nitro sin durationMs", m.ID, e.EventID)
+			}
+			delete(hand, p)
+		case "COLLISION", "SPIN":
+			incident[p] = lap
+		case "RESPAWN":
+			if l, ok := incident[p]; !ok || l != lap {
+				t.Fatalf("%s: %s sin choque o trompo antes en esa vuelta", m.ID, e.EventID)
+			}
+			delete(incident, p)
+		case "DNF":
+			out[p] = true
+		case "LAP_COMPLETED":
+			lapsDone[p]++
 		}
 	}
+
 	if drivers < 3 || drivers > 6 {
 		t.Fatalf("%s: %d pilotos", m.ID, drivers)
 	}
-	if lapEvents != drivers*laps {
-		t.Fatalf("%s: %d LAP_COMPLETED, se esperaban %d", m.ID, lapEvents, drivers*laps)
-	}
 	ranking := data(t, m.Events[len(m.Events)-1])["ranking"].([]any)
-	if len(ranking) != drivers {
-		t.Fatalf("%s: ranking %v", m.ID, ranking)
+	if len(ranking) != drivers-len(out) {
+		t.Fatalf("%s: ranking %v con %d pilotos y %d abandonos", m.ID, ranking, drivers, len(out))
+	}
+	for _, r := range ranking {
+		p := r.(string)
+		if out[p] || lapsDone[p] != laps {
+			t.Fatalf("%s: %s en el ranking con DNF=%v y %d vueltas", m.ID, p, out[p], lapsDone[p])
+		}
+	}
+}
+
+// Entre muchas carreras al azar aparecen todas las acciones de racing del
+// catálogo (así el simulador no se olvida ninguna).
+func TestRacingUsesAllActions(t *testing.T) {
+	used := map[string]bool{}
+	for seed := int64(1); seed <= 50; seed++ {
+		for _, m := range Generate(seed, 3, 0) {
+			if m.Script != "" {
+				continue
+			}
+			for _, e := range m.Events {
+				used[e.Action] = true
+			}
+		}
+	}
+	for action := range validation.GameActions["racing"] {
+		if !used[action] {
+			t.Errorf("ninguna carrera al azar usó %s", action)
+		}
 	}
 }
 

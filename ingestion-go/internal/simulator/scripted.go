@@ -18,6 +18,9 @@ func scriptedMatches(seed int64) []Match {
 	return []Match{
 		raceComeback(id("race", "comeback"), scriptBase),
 		racePenaltyChangesResult(id("race", "penalty"), scriptBase.Add(10*time.Minute)),
+		raceClean(id("race", "clean"), scriptBase.Add(20*time.Minute)),
+		raceItemMaster(id("race", "items"), scriptBase.Add(30*time.Minute)),
+		racePauseDNF(id("race", "dnf"), scriptBase.Add(40*time.Minute)),
 		footballComeback(id("foot", "comeback"), scriptBase.Add(1*time.Hour)),
 		footballDraw(id("foot", "draw"), scriptBase.Add(3*time.Hour)),
 		footballHatTrick(id("foot", "hattrick"), scriptBase.Add(5*time.Hour)),
@@ -36,7 +39,7 @@ func raceComeback(id string, start time.Time) Match {
 		{81500, 81400, 81600, 80950}, // vuelta 2: p1, p4, p2, p3
 		{82000, 81800, 81900, 80200}, // vuelta 3: p4, p2, p1, p3
 	}
-	m := buildRace(id, start, "interlagos", lapTimes, nil)
+	m := buildRace(id, start, racePlan{track: "rainbow_road", lapTimes: lapTimes})
 	m.Script = "remontada de posición: p4 sale último y gana"
 	return m
 }
@@ -52,8 +55,83 @@ func racePenaltyChangesResult(id string, start time.Time) Match {
 		{81000, 82000, 83000},
 	}
 	penalties := []racePenalty{{driver: 0, lap: 2, seconds: 5, reason: "track_limits"}}
-	m := buildRace(id, start, "monza", lapTimes, penalties)
+	m := buildRace(id, start, racePlan{track: "neon_city", lapTimes: lapTimes, penalties: penalties})
 	m.Script = "penalización que cambia el resultado: p1 llega primero pero pierde con +5 s"
+	return m
+}
+
+// raceClean: p1 gana de punta a punta sin choques ni penalizaciones
+// (CLEAN_RACE). Los demás sí tienen problemas: p2 choca con p3 en la vuelta
+// 2 y vuelve a la pista; p3 recibe 5 s en la vuelta 3. Ranking: p1, p3, p2, p4.
+func raceClean(id string, start time.Time) Match {
+	lapTimes := [][]int{
+		//  p1     p2     p3     p4
+		{80500, 81500, 82000, 83000},
+		{80500, 87000, 82500, 83000}, // p2 pierde 5.5 s por el choque
+		{80500, 81500, 82000, 83000},
+	}
+	actions := []raceAction{
+		{driver: 0, lap: 1, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 1, "corner": 3, "durationMs": 1800}},
+		{driver: 0, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "boost"}},
+		{driver: 0, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "boost", "durationMs": 2500}},
+		{driver: 1, lap: 2, at: 0.45, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p3", "damage": 40}},
+		{driver: 1, lap: 2, at: 0.47, action: "RESPAWN"},
+		{driver: 3, lap: 3, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 3, "corner": 6, "durationMs": 1200}},
+	}
+	penalties := []racePenalty{{driver: 2, lap: 3, seconds: 5, reason: "corner_cutting"}}
+	m := buildRace(id, start, racePlan{track: "desert_dunes", lapTimes: lapTimes, actions: actions, penalties: penalties})
+	m.Script = "carrera limpia: p1 gana sin choques ni penalizaciones"
+	return m
+}
+
+// raceItemMaster: p2 usa los 3 objetos (nitro, escudo y aceite, uno por
+// vuelta) y gana (ITEM_MASTER). p3 hace un trompo con el aceite y vuelve a la
+// pista. p4 es muy lento: p1 y p2 le sacan una vuelta (LAPPED).
+// Ranking: p2, p1, p3, p4.
+func raceItemMaster(id string, start time.Time) Match {
+	lapTimes := [][]int{
+		//  p1     p2     p3      p4
+		{81000, 80500, 82000, 125000},
+		{81000, 80500, 82000, 125000},
+		{81000, 80500, 87000, 125000}, // p3 pierde 5 s por el trompo
+	}
+	actions := []raceAction{
+		{driver: 1, lap: 1, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 1, "item": "boost"}},
+		{driver: 1, lap: 1, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 1, "item": "boost", "durationMs": 3000}},
+		{driver: 0, lap: 2, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 2, "corner": 2, "durationMs": 2200}},
+		{driver: 1, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "shield"}},
+		{driver: 1, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "shield"}},
+		{driver: 1, lap: 3, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 3, "item": "oil"}},
+		{driver: 1, lap: 3, at: 0.3, action: "ITEM_USED", data: map[string]any{"lap": 3, "item": "oil"}},
+		{driver: 2, lap: 3, at: 0.45, action: "SPIN", data: map[string]any{"lap": 3, "corner": 5}},
+		{driver: 2, lap: 3, at: 0.47, action: "RESPAWN"},
+	}
+	m := buildRace(id, start, racePlan{track: "jungle_ruins", lapTimes: lapTimes, actions: actions})
+	m.Script = "item master: p2 usa nitro, escudo y aceite; p4 recibe una vuelta (LAPPED)"
+	return m
+}
+
+// racePauseDNF: en la vuelta 2, p3 (que iba primero) choca con p1, hace un
+// trompo y abandona (DNF). La carrera se pausa 30 s para limpiar la pista.
+// p2 adelanta a p1 y gana. p3 no aparece en el ranking: p2, p1, p4.
+func racePauseDNF(id string, start time.Time) Match {
+	lapTimes := [][]int{
+		//  p1     p2     p3     p4
+		{81000, 81200, 80800, 82500}, // vuelta 1: p3, p1, p2, p4
+		{84000, 81000, 82000, 82500}, // p1 pierde tiempo por el golpe
+		{81000, 80800, 82000, 82500},
+	}
+	actions := []raceAction{
+		{driver: 2, lap: 2, at: 0.4, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p1", "damage": 70}},
+		{driver: 2, lap: 2, at: 0.42, action: "SPIN", data: map[string]any{"lap": 2, "corner": 7}},
+	}
+	plan := racePlan{
+		track: "frozen_peak", lapTimes: lapTimes, actions: actions,
+		dnf:   &raceDNF{driver: 2, lap: 2, reason: "crash"}, // abandona a los 130.0 s
+		pause: &racePause{atMs: 131000, seconds: 30, reason: "crash_cleanup"},
+	}
+	m := buildRace(id, start, plan)
+	m.Script = "pausa y abandono: p3 choca, abandona (DNF) y se pausa la carrera para limpiar la pista"
 	return m
 }
 
