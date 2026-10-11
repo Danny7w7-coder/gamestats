@@ -144,21 +144,29 @@ curl http://localhost:8080/matches
 docker compose down
 ```
 
-El simulador genera siempre las mismas partidas para la misma semilla (`-seed 42` por defecto): 4 de racing, 4 de football y 5 escenarios fijos que prueban las reglas. Se pueden cambiar las opciones, por ejemplo:
+El simulador genera siempre las mismas partidas para la misma semilla (`-seed 42` por defecto): 4 partidas al azar de cada juego y 13 escenarios fijos que prueban los patrones, **29 partidas en total**. Además daña un 3 % de los eventos a propósito, para mostrar que Go los rechaza. Se pueden cambiar las opciones, por ejemplo:
 
 ```bash
-docker compose run --rm simulator -target http://ingestion:8080 -racing 10 -football 10 -seed 7
+docker compose run --rm simulator -target http://ingestion:8080 -racing 10 -football 10 -fighting 10 -tetris 10 -seed 7
 ```
 
-| Escenario fijo (seed 42) | Qué prueba |
-|---|---|
-| `race-s42-comeback` | Remontada: p4 sale último y gana → `COMEBACK` |
-| `race-s42-penalty` | p1 llega primero pero una penalización de 5 s le hace perder |
-| `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1 → `COMEBACK`; tarjeta roja; gol sin asistencia |
-| `foot-s42-draw` | Empate 1-1 → sin ganador; jugadores sin tiros |
-| `foot-s42-hattrick` | p1 anota 3 goles → `HAT_TRICK` |
+| Escenario fijo (seed 42) | Qué pasa | Patrones |
+|---|---|---|
+| `race-s42-comeback` | p4 sale último y gana | `COMEBACK`, `CLEAN_RACE` |
+| `race-s42-penalty` | p1 es el más rápido en pista, pero una penalización de 5 s le hace perder | `CLEAN_RACE` (de p2) |
+| `race-s42-clean` | p1 gana sin choques ni penalizaciones; los demás sí los tienen | `CLEAN_RACE` |
+| `race-s42-items` | p2 usa nitro, escudo y aceite; p4 recibe una vuelta (`LAPPED`) | `ITEM_MASTER`, `CLEAN_RACE` |
+| `race-s42-dnf` | p3 choca y abandona (`DNF`); la carrera se pausa; p2 gana desde el 3.er lugar | `COMEBACK`, `CLEAN_RACE` |
+| `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1; roja a p12; gol sin asistencia | `COMEBACK` |
+| `foot-s42-draw` | Empate 1-1 (sin ganador); jugadores sin tiros al arco | ninguno |
+| `foot-s42-hattrick` | Hat-trick de p4 (uno de tiro potente); A gana 3-1 | `HAT_TRICK` |
+| `foot-s42-cleansheet` | A gana 3-0 con autogol, tiro potente y 2 atajadas; usa las 11 acciones | `CLEAN_SHEET` |
+| `fight-s42-flawless` | p1 gana el round 1 sin recibir daño y remata con una fatality; usa las 10 acciones | `FLAWLESS_VICTORY`, `FATALITY` |
+| `fight-s42-comeback` | p1 gana el round 1 por tiempo y p2 gana los rounds 2 y 3 | `COMEBACK` |
+| `tetris-s42-b2b` | Dos tetris seguidos (con `HOLD`) y subida al nivel 2 | `BACK_TO_BACK` |
+| `tetris-s42-perfect` | 3 T-spins y un tetris que deja el tablero vacío, con pausa | `PERFECT_CLEAR`, `T_SPIN_MASTER` |
 
-> El simulador todavía genera solo partidas de racing y football con las acciones originales. Las partidas de fighting y tetris, y las acciones nuevas de racing y football, se agregan con la actualización del módulo de Go. Mientras tanto, los fixtures de `contracts/fixtures/` se pueden enviar directo a Scala (`POST /analyze`), como se muestra en [`contracts/README.md`](contracts/README.md).
+En football, p1 y p7 son los porteros de A y B.
 
 ### Opción 2: sin Docker
 
