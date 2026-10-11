@@ -42,7 +42,7 @@ flowchart LR
 
 1. Los eventos llegan a `POST /events` del servicio Go. Cada evento se valida por separado: uno inválido se rechaza (y se anota en un log) sin afectar a los demás.
 2. Go agrupa los eventos por `matchId`. Cuando llega `MATCH_FINISHED`, ordena los eventos por `timestamp` y envía la partida completa a Scala. Si Scala no responde o responde `5xx`, reintenta 3 veces (1, 2 y 4 s).
-3. Scala valida el lote, elige el analizador del juego (`racing` o `football`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
+3. Scala valida el lote en dos pasos: el formato de cada evento y su `data`, y después la coherencia con el resto de la partida (validaciones de contexto). Los eventos inválidos se descartan y quedan en el log. Luego elige el analizador del juego (`racing`, `football`, `fighting` o `tetris`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
 4. Los resultados se consultan en `GET /results` y `GET /players/{playerId}`.
 
 ### Estructura del repositorio
@@ -59,51 +59,68 @@ gamestats/
 
 ## Juegos y eventos
 
-Se eligieron dos juegos con estructuras distintas, para comprobar que el sistema es genérico y no está pensado para un solo juego:
+GameStats analiza cuatro juegos con estructuras distintas, para comprobar que el sistema es genérico y no está pensado para un solo juego. Cada uno toma como referencia un videojuego conocido, en versión simple:
 
-| | Racing (carreras) | Football (fútbol) |
-|---|---|---|
-| Competencia | Individual: cada jugador contra todos | Por equipos: dos equipos de varios jugadores |
-| Qué se mide | Tiempos continuos (milisegundos por vuelta) y posiciones que cambian | Acciones discretas (pases, tiros, goles, faltas) y un marcador |
-| Interacción entre jugadores | Indirecta (adelantamientos) | Directa (un pase tiene destinatario, un gol puede tener asistencia) |
-| Cómo se decide el ganador | Orden de llegada (`ranking`) | Equipo con más goles; puede haber empate |
+| | Racing (carreras) | Football (fútbol) | Fighting (peleas) | Tetris |
+|---|---|---|---|---|
+| Referencia | Mario Kart | Arcade retro 6 vs 6 (Nintendo World Cup, Super Sidekicks) | Mortal Kombat | Tetris clásico |
+| Jugadores | Varios, cada uno contra todos | Dos equipos de hasta 6 (5 de campo y portero) | Dos (1 contra 1), por rounds | Uno solo |
+| Qué se mide | Tiempos de vuelta, posiciones y objetos | Acciones discretas y un marcador | Daño, golpes y rounds | Puntaje, líneas y piezas |
+| Interacción entre jugadores | Indirecta (adelantar, chocar, el aceite del otro) | Directa (pases, entradas, asistencias) | Directa (cada golpe tiene un objetivo) | Ninguna |
+| Cómo se decide el ganador | Orden de llegada (`ranking`) | Equipo con más goles; puede haber empate | Quien gana más rounds; puede haber empate | No hay ganador (`null`): se juega contra uno mismo |
 
 ### Tipos de evento (comunes a todos los juegos)
 
-`MATCH_STARTED`, `MATCH_FINISHED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED` y `PLAYER_ACTION`. Describen el ciclo de vida de una partida y son iguales para cualquier juego. Lo específico de cada juego va dentro de `PLAYER_ACTION`, en los campos `action` y `data`.
+`MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED`, `PLAYER_RECONNECTED` y `PLAYER_ACTION`. Describen el ciclo de vida de una partida y son iguales para cualquier juego; los de partida (`MATCH_*`) no llevan `playerId`. Lo específico de cada juego va dentro de `PLAYER_ACTION`, en los campos `action` y `data`.
 
 ### Acciones de cada juego
 
-| Juego | Acción | Por qué existe |
+| Juego | Acciones | Para qué sirven |
 |---|---|---|
-| Racing | `LAP_COMPLETED` `{lap, lapTimeMs, position}` | Da los tiempos de vuelta (mejor vuelta, promedio, consistencia) y la posición en cada vuelta. |
-| Racing | `POSITION_CHANGED` `{from, to, lap}` | Registra los adelantamientos entre vueltas; permite reconstruir la línea de tiempo de posiciones para detectar remontadas. |
-| Racing | `PENALTY` `{seconds, reason}` | Un castigo cambia el tiempo efectivo y puede cambiar el ganador aunque el jugador haya sido el más rápido. |
-| Football | `PASS` `{teamId, targetId, success, distance, minute}` | Mide la precisión de pase de cada jugador. |
-| Football | `SHOT` `{teamId, onTarget, minute}` | Junto con `GOAL`, mide la efectividad de tiro. |
-| Football | `GOAL` `{teamId, assistId?, minute}` | Construye el marcador y su evolución en el tiempo (remontadas), y registra asistencias. |
-| Football | `FOUL` `{teamId, card, minute, targetId?}` | Faltas por equipo y tarjetas; con roja el jugador no genera más eventos. |
+| Racing (12) | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED` | Tiempos de vuelta, posiciones y su línea de tiempo (remontadas), adelantamientos y vueltas sacadas. |
+| | `ITEM_PICKUP`, `ITEM_USED` | Objetos `boost` (nitro), `shield` (escudo) y `oil` (aceite). Cada jugador lleva uno a la vez. |
+| | `DRIFT`, `COLLISION`, `SPIN`, `RESPAWN` | Derrapes, choques y trompos; `RESPAWN` es volver a la pista después de un choque o trompo. |
+| | `PENALTY`, `DNF` | Segundos de castigo (cambian el tiempo efectivo y pueden cambiar el ganador) y abandono. |
+| Football (11) | `PASS`, `DRIBBLE` | Precisión de pase y regates exitosos. |
+| | `SHOT`, `POWER_SHOT`, `GOAL`, `OWN_GOAL` | Tiros normales y potentes, goles con asistencia opcional y autogoles (suman para el rival). Con ellos se arma el marcador y su evolución. |
+| | `SAVE`, `TACKLE`, `INTERCEPTION` | Atajadas del portero y balones recuperados. |
+| | `FOUL`, `CORNER` | Faltas con tarjeta (con roja el jugador queda fuera) y córners por equipo. |
+| Fighting (10) | `ATTACK`, `SPECIAL_MOVE`, `COMBO`, `THROW` | Golpes (puño, patada, gancho), especiales, combos y agarres: daño hecho y precisión. |
+| | `BLOCK`, `COMBO_BREAKER`, `KNOCKDOWN` | Defensa (bloquear, cortar el combo del rival) y derribos. |
+| | `FATAL_BLOW`, `ROUND_WON`, `FATALITY` | Golpe fatal (una vez por pelea, solo con poca vida), ganador de cada round (KO o tiempo) y remate final del ganador. |
+| Tetris (13) | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED` | El recorrido de cada pieza: aparece, se mueve, gira, cae y queda fija. |
+| | `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR` | Líneas limpiadas y puntos, giros especiales de la T y tablero vacío. |
+| | `LEVEL_UP`, `STACK_HEIGHT`, `TOP_OUT` | Niveles, altura de la pila y fin de la partida. |
 
-El formato completo de los eventos, del lote que Go envía a Scala y del resultado está en [`contracts/`](contracts/README.md), como JSON Schema y con ejemplos (fixtures) que usan las pruebas de los dos módulos.
+El formato exacto de cada evento (campos, rangos y valores permitidos), del lote que Go envía a Scala y del resultado está en [`contracts/`](contracts/README.md), como JSON Schema y con ejemplos (fixtures) que usan las pruebas de los dos módulos.
+
+### Validación
+
+Cada evento pasa por tres controles:
+
+1. **Go**, al recibirlo: campos obligatorios, `timestamp` válido, tipo conocido y acción dentro del catálogo del juego.
+2. **Scala, formato**: el `data` de cada acción tiene los campos, tipos, rangos y valores del schema (por ejemplo, `damage` entre 0 y 100, `item` uno de `boost`/`shield`/`oil`, un golpe fallado no hace daño).
+3. **Scala, contexto**: el evento es coherente con lo que ya pasó en la partida. Hay 19 reglas, por ejemplo: no hay acciones durante una pausa; no se puede usar un objeto que no se agarró; nadie juega después de un `DNF`, una roja o un `TOP_OUT`; máximo 6 jugadores por equipo; solo el ganador de la pelea puede hacer la `FATALITY`; el nivel de tetris solo sube.
+
+Un evento que falla se descarta (con su motivo en el log) y el resto de la partida se analiza igual; el lote completo solo se rechaza si el problema es del lote. Los fixtures `*_invalid_events.json` traen un evento inválido por cada regla, y las pruebas comprueban que se descarten exactamente esos. La lista completa de reglas está en [`contracts/README.md`](contracts/README.md#validaciones-de-contexto).
 
 ### Agregar un juego nuevo
 
 No obliga a reescribir el sistema:
 
 - **Go**: agregar el juego y sus acciones al catálogo (`ingestion-go/internal/validation/catalog.go`).
-- **Scala**: agregar el parseo de sus acciones (`Codecs.parseAction`), un analizador nuevo (`XAnalyzer`) con sus reglas, y registrarlo en `Analyzer.registry`. Las estadísticas genéricas (duración, eventos por acción, jugadores) funcionan sin cambios.
+- **Scala**: agregar sus acciones al modelo (`model/Event.scala`) y su lectura con rangos (`Codecs.parseAction`); un analizador nuevo (`XAnalyzer`) con sus métricas y reglas; si tiene reglas de contexto, un `ContextCheck` propio (`validation/`); y registrarlo en `Analyzer.registry`. Las estadísticas genéricas (duración, eventos por acción, jugadores) y las validaciones comunes (pausa, referencias a otros jugadores) funcionan sin cambios.
 
 ## Estadísticas y reglas
 
-| | Racing | Football |
-|---|---|---|
-| **Por jugador** | Mejor vuelta, promedio por vuelta, consistencia (desviación estándar de las vueltas), segundos de penalización | Goles, asistencias, tiros, precisión de pase (exitosos / total) |
-| **Por partida** | Duración, ganador (primero del `ranking`), eventos por acción | Duración, marcador final, ganador (`null` en empate), goles y faltas por equipo, eventos por acción |
-| **Combina tipos de evento** | Tiempo efectivo = suma de vueltas (`LAP_COMPLETED`) + penalizaciones (`PENALTY`) | Efectividad de tiro = goles (`GOAL`) / tiros (`SHOT`) |
-| **Regla por secuencia** | `COMEBACK`: el ganador estuvo en 3.er lugar o peor en algún momento | `COMEBACK`: el equipo ganador estuvo perdiendo en algún momento |
-| **Regla adicional** | | `HAT_TRICK`: un jugador anota 3 goles o más |
+| | Por jugador | Por partida | Patrones |
+|---|---|---|---|
+| **Racing** | Mejor vuelta, promedio, consistencia (desviación estándar de las vueltas), penalización, tiempo efectivo (vueltas + penalización), adelantamientos, objetos agarrados y usados, nitros, choques provocados | Duración, ganador (primero del `ranking`), eventos por acción | `COMEBACK`: el ganador estuvo 3.º o peor · `CLEAN_RACE`: el ganador no tuvo choques ni penalizaciones · `ITEM_MASTER`: alguien usó los tres objetos |
+| **Football** | Goles, asistencias, tiros, efectividad de tiro (goles / tiros), tiros potentes, precisión de pase, atajadas, recuperaciones (entradas exitosas + intercepciones), regates exitosos | Duración, marcador (con autogoles), ganador (`null` en empate), goles, faltas y córners por equipo | `COMEBACK`: el equipo ganador estuvo perdiendo · `HAT_TRICK`: 3 goles o más de un jugador · `CLEAN_SHEET`: el ganador no recibió goles |
+| **Fighting** | Daño hecho, precisión (golpes que conectaron / intentados), combo más largo, especiales, bloqueos, combos cortados, derribos, rounds ganados | Duración, ganador (más rounds; `null` en empate) | `COMEBACK`: perdió el primer round y ganó la pelea · `FLAWLESS_VICTORY`: ganó un round sin recibir daño · `FATALITY`: remató al rival |
+| **Tetris** | Puntaje, líneas, tetris (4 líneas de una vez), piezas colocadas, piezas por minuto, nivel máximo, combo máximo, T-spins, hard drops | Duración, eventos por acción (sin ganador) | `BACK_TO_BACK`: dos tetris seguidos · `PERFECT_CLEAR`: tablero vacío · `T_SPIN_MASTER`: 3 T-spins o más |
 
-Casos borde cubiertos: jugador sin tiros o sin pases (0.0, nunca se divide entre 0), empate (sin ganador y sin `COMEBACK`), equipo sin goles (aparece con 0 en el marcador) y gol sin asistencia.
+Casos borde cubiertos: divisiones sin intentos (0.0, nunca se divide entre 0), empates (sin ganador y sin `COMEBACK`), equipo sin goles (aparece con 0), gol sin asistencia, autogol que da vuelta un partido, jugador sin eventos (métricas en 0) y partida sin `MATCH_FINISHED` (sin ganador).
 
 ## Cómo correrlo
 
@@ -140,6 +157,8 @@ docker compose run --rm simulator -target http://ingestion:8080 -racing 10 -foot
 | `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1 → `COMEBACK`; tarjeta roja; gol sin asistencia |
 | `foot-s42-draw` | Empate 1-1 → sin ganador; jugadores sin tiros |
 | `foot-s42-hattrick` | p1 anota 3 goles → `HAT_TRICK` |
+
+> El simulador todavía genera solo partidas de racing y football con las acciones originales. Las partidas de fighting y tetris, y las acciones nuevas de racing y football, se agregan con la actualización del módulo de Go. Mientras tanto, los fixtures de `contracts/fixtures/` se pueden enviar directo a Scala (`POST /analyze`), como se muestra en [`contracts/README.md`](contracts/README.md).
 
 ### Opción 2: sin Docker
 
@@ -197,7 +216,7 @@ Quién valida qué (Go o Scala) y cuándo un lote se rechaza está detallado en 
 ## Pruebas
 
 ```bash
-# Scala: parseo, estadísticas, reglas, almacenamiento y endpoints
+# Scala: parseo, validaciones de contexto, estadísticas y reglas de los 4 juegos, almacenamiento y endpoints
 cd analytics-scala
 sbt test
 
@@ -206,7 +225,7 @@ cd ingestion-go
 go test ./...
 ```
 
-Las pruebas de los dos módulos usan los mismos ejemplos de `contracts/fixtures/`, así que si el contrato cambia, ambos lo detectan.
+Las pruebas de los dos módulos usan los mismos ejemplos de `contracts/fixtures/`, así que si el contrato cambia, ambos lo detectan. Hay una partida válida o más por juego, con escenarios que disparan cada patrón, y una partida inválida por juego donde cada evento `bad-*` rompe una regla distinta.
 
 ## Integración continua y despliegue
 
