@@ -11,6 +11,8 @@ import (
 const (
 	TypeMatchStarted       = "MATCH_STARTED"
 	TypeMatchFinished      = "MATCH_FINISHED"
+	TypeMatchPaused        = "MATCH_PAUSED"
+	TypeMatchResumed       = "MATCH_RESUMED"
 	TypePlayerJoined       = "PLAYER_JOINED"
 	TypePlayerLeft         = "PLAYER_LEFT"
 	TypePlayerDisconnected = "PLAYER_DISCONNECTED"
@@ -22,11 +24,22 @@ const (
 var eventTypes = map[string]bool{
 	TypeMatchStarted:       true,
 	TypeMatchFinished:      true,
+	TypeMatchPaused:        true,
+	TypeMatchResumed:       true,
 	TypePlayerJoined:       true,
 	TypePlayerLeft:         true,
 	TypePlayerDisconnected: true,
 	TypePlayerReconnected:  true,
 	TypePlayerAction:       true,
+}
+
+// matchTypes son los eventos de la partida completa (no de un jugador): son
+// los únicos que pueden venir sin playerId.
+var matchTypes = map[string]bool{
+	TypeMatchStarted:  true,
+	TypeMatchFinished: true,
+	TypeMatchPaused:   true,
+	TypeMatchResumed:  true,
 }
 
 // Validate devuelve nil si el evento es válido, o un error cuyo mensaje es el
@@ -67,8 +80,9 @@ func Validate(e model.Event) error {
 		return fmt.Errorf("type desconocido: %q", e.Type)
 	}
 
-	// Regla 5: playerId obligatorio salvo en MATCH_STARTED y MATCH_FINISHED.
-	if e.PlayerID == "" && e.Type != TypeMatchStarted && e.Type != TypeMatchFinished {
+	// Regla 5: playerId obligatorio salvo en los eventos de partida
+	// (MATCH_STARTED, MATCH_FINISHED, MATCH_PAUSED y MATCH_RESUMED).
+	if e.PlayerID == "" && !matchTypes[e.Type] {
 		return fmt.Errorf("falta el campo playerId (obligatorio en %s)", e.Type)
 	}
 
