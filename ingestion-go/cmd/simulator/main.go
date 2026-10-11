@@ -1,9 +1,9 @@
-// Simulador de GameStats: genera partidas de racing, football y fighting y
-// las envía al servidor de ingestión (POST {target}/events).
+// Simulador de GameStats: genera partidas de racing, football, fighting y
+// tetris y las envía al servidor de ingestión (POST {target}/events).
 //
 // Ejemplo:
 //
-//	go run ./cmd/simulator -racing 4 -football 4 -fighting 4 -seed 42 -target http://localhost:8080
+//	go run ./cmd/simulator -racing 4 -football 4 -fighting 4 -tetris 4 -seed 42 -target http://localhost:8080
 package main
 
 import (
@@ -18,13 +18,14 @@ func main() {
 	racing := flag.Int("racing", 4, "cuántas partidas aleatorias de racing generar (además de las guionizadas)")
 	football := flag.Int("football", 4, "cuántas partidas aleatorias de football generar (además de las guionizadas)")
 	fighting := flag.Int("fighting", 4, "cuántas partidas aleatorias de fighting generar (además de las guionizadas)")
+	tetris := flag.Int("tetris", 4, "cuántas partidas aleatorias de tetris generar (además de las guionizadas)")
 	seed := flag.Int64("seed", 42, "semilla: la misma semilla genera exactamente las mismas partidas")
 	target := flag.String("target", "http://localhost:8080", "dirección del servidor de ingestión")
 	corrupt := flag.Int("corrupt", 3, "porcentaje (0 a 100) de eventos a los que se agrega una copia dañada a propósito")
 	flag.Parse()
 
-	if *racing < 0 || *football < 0 || *fighting < 0 {
-		fmt.Fprintln(os.Stderr, "-racing, -football y -fighting no pueden ser negativos")
+	if *racing < 0 || *football < 0 || *fighting < 0 || *tetris < 0 {
+		fmt.Fprintln(os.Stderr, "-racing, -football, -fighting y -tetris no pueden ser negativos")
 		os.Exit(2)
 	}
 	if *corrupt < 0 || *corrupt > 100 {
@@ -32,7 +33,8 @@ func main() {
 		os.Exit(2)
 	}
 
-	matches := simulator.Generate(*seed, simulator.Counts{Racing: *racing, Football: *football, Fighting: *fighting})
+	n := simulator.Counts{Racing: *racing, Football: *football, Fighting: *fighting, Tetris: *tetris}
+	matches := simulator.Generate(*seed, n)
 	damaged := simulator.Corrupt(matches, *seed, *corrupt)
 	total := 0
 	for _, m := range matches {

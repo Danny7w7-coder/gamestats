@@ -15,7 +15,7 @@ import (
 )
 
 func TestSameSeedSameMatches(t *testing.T) {
-	n := Counts{Racing: 3, Football: 3, Fighting: 3}
+	n := Counts{Racing: 3, Football: 3, Fighting: 3, Tetris: 3}
 	a := Generate(42, n)
 	b := Generate(42, n)
 	if !reflect.DeepEqual(a, b) {
@@ -29,7 +29,7 @@ func TestSameSeedSameMatches(t *testing.T) {
 // Revisa muchas semillas para atrapar casos raros.
 func TestGeneratedMatchesFollowTheRules(t *testing.T) {
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, Counts{Racing: 2, Football: 2, Fighting: 2}) {
+		for _, m := range Generate(seed, Counts{Racing: 2, Football: 2, Fighting: 2, Tetris: 2}) {
 			checkCommon(t, m)
 			switch m.GameID {
 			case "racing":
@@ -38,6 +38,8 @@ func TestGeneratedMatchesFollowTheRules(t *testing.T) {
 				checkFootball(t, m)
 			case "fighting":
 				checkFighting(t, m)
+			case "tetris":
+				checkTetris(t, m)
 			}
 		}
 	}
@@ -415,6 +417,68 @@ func TestFightingUsesAllActions(t *testing.T) {
 	}
 }
 
+// checkTetris revisa las reglas de contexto de tetris (las mismas que aplica
+// Scala): un solo jugador, LEVEL_UP siempre a un nivel mayor (arrancando en
+// startLevel) y nada después de TOP_OUT, que tiene que estar.
+func checkTetris(t *testing.T, m Match) {
+	t.Helper()
+	level := int(data(t, m.Events[0])["startLevel"].(float64))
+	if level < 1 || level > 15 {
+		t.Fatalf("%s: startLevel %d", m.ID, level)
+	}
+
+	player := ""
+	toppedOut := false
+	for _, e := range m.Events {
+		if e.PlayerID == "" {
+			continue
+		}
+		if player == "" {
+			player = e.PlayerID
+		}
+		if e.PlayerID != player {
+			t.Fatalf("%s: %s es de %s, pero la partida es de %s", m.ID, e.EventID, e.PlayerID, player)
+		}
+		if toppedOut {
+			t.Fatalf("%s: %s después del TOP_OUT", m.ID, e.EventID)
+		}
+		switch e.Action {
+		case "LEVEL_UP":
+			next := int(data(t, e)["level"].(float64))
+			if next <= level {
+				t.Fatalf("%s: LEVEL_UP a %d desde el nivel %d", m.ID, next, level)
+			}
+			level = next
+		case "TOP_OUT":
+			toppedOut = true
+		}
+	}
+	if !toppedOut {
+		t.Fatalf("%s: la partida termina sin TOP_OUT", m.ID)
+	}
+}
+
+// Entre muchas partidas al azar aparecen todas las acciones de tetris del
+// catálogo.
+func TestTetrisUsesAllActions(t *testing.T) {
+	used := map[string]bool{}
+	for seed := int64(1); seed <= 50; seed++ {
+		for _, m := range Generate(seed, Counts{Tetris: 2}) {
+			if m.Script != "" {
+				continue
+			}
+			for _, e := range m.Events {
+				used[e.Action] = true
+			}
+		}
+	}
+	for action := range validation.GameActions["tetris"] {
+		if !used[action] {
+			t.Errorf("ninguna partida al azar usó %s", action)
+		}
+	}
+}
+
 // Send manda cada partida completa, en varios POST, y suma las respuestas.
 func TestSend(t *testing.T) {
 	var mu sync.Mutex
@@ -431,7 +495,7 @@ func TestSend(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	matches := Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2})
+	matches := Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2, Tetris: 2})
 	results := Send(srv.URL, matches)
 
 	for i, m := range matches {

@@ -27,6 +27,8 @@ func scriptedMatches(seed int64) []Match {
 		footballCleanSheet(id("foot", "cleansheet"), scriptBase.Add(7*time.Hour)),
 		fightFlawless(id("fight", "flawless"), scriptBase.Add(9*time.Hour)),
 		fightComeback(id("fight", "comeback"), scriptBase.Add(9*time.Hour+10*time.Minute)),
+		tetrisBackToBack(id("tetris", "b2b"), scriptBase.Add(10*time.Hour)),
+		tetrisPerfectClear(id("tetris", "perfect"), scriptBase.Add(10*time.Hour+30*time.Minute)),
 	}
 }
 
@@ -305,4 +307,102 @@ func fightComeback(id string, start time.Time) Match {
 	g.attack("p2", "uppercut", 20) // p1 queda en 0
 	g.roundWon("p2", "ko")
 	return scripted(g.finish(), "remontada: p1 gana el round 1 y p2 gana los rounds 2 y 3")
+}
+
+// ---------------------------------------------------------------------------
+// Tetris
+//
+// Basados en los fixtures de Danny (tetris_match_ok y tetris_perfect_clear).
+// tetrisGame lleva la pila, las líneas y el nivel: los puntos, LEVEL_UP y
+// ALL_CLEAR salen solos.
+
+// tetrisFill coloca piezas que no limpian líneas, cada una sube la pila una fila.
+func tetrisFill(g *tetrisGame, ps ...string) {
+	for i, p := range ps {
+		g.wait(2 * time.Second)
+		g.spawn(p)
+		g.move(sides[i%2])
+		g.place(true, 1)
+		g.clear(0, false)
+	}
+}
+
+// tetrisBackToBack: p1 desde el nivel 1 arma una pila de 10 filas y hace dos
+// tetris seguidos (back-to-back), usando HOLD para guardar una O y sacar la
+// I. Con un T-spin doble llega a 10 líneas y sube al nivel 2. Después la
+// pila crece hasta 20 y pierde (TOP_OUT). Sin ALL_CLEAR.
+func tetrisBackToBack(id string, start time.Time) Match {
+	g := newTetrisGame(id, start, 1)
+	tetrisFill(g, "O", "S", "Z", "L", "J", "O", "L", "J", "S", "Z") // pila 10
+	g.reportStack()
+	// Primer tetris: pila 10 -> 6.
+	g.wait(2 * time.Second)
+	g.spawn("I")
+	g.move("right")
+	g.rotate("cw")
+	g.place(true, 0)
+	g.clear(4, false)
+	// Sale una O, la guarda y sale la I: segundo tetris (back-to-back), 6 -> 2.
+	g.wait(2 * time.Second)
+	g.spawn("O")
+	g.hold("I")
+	g.place(true, 0)
+	g.clear(4, false)
+	// T-spin doble: la T sube la pila a 3 y limpia 2 -> 1. Son 10 líneas: nivel 2.
+	g.wait(2 * time.Second)
+	g.spawn("T")
+	g.rotate("ccw")
+	g.place(false, 1)
+	g.clear(2, true)
+	// La pila crece 3 filas por pieza hasta llegar arriba.
+	for _, p := range []string{"Z", "S", "L", "J", "Z", "S", "O"} {
+		g.wait(2 * time.Second)
+		g.spawn(p)
+		g.move("left")
+		g.place(false, 3)
+		g.clear(0, false)
+		if g.stack >= 20 {
+			break
+		}
+		g.reportStack()
+	}
+	g.topOut()
+	return scripted(g.finish(), "back-to-back: dos tetris seguidos (con HOLD), sube al nivel 2 y pierde")
+}
+
+// tetrisPerfectClear: p1 desde el nivel 5 hace 3 T-spins (de 0, 1 y 2
+// líneas: T-spin master) y un tetris que deja el tablero vacío (ALL_CLEAR,
+// perfect clear). Pausa la partida en el medio y al final pierde.
+func tetrisPerfectClear(id string, start time.Time) Match {
+	g := newTetrisGame(id, start, 5)
+	tetrisFill(g, "L", "J", "O") // pila 3
+	tSpin := func(lines int) {
+		g.wait(2 * time.Second)
+		g.spawn("T")
+		g.rotate("cw")
+		g.place(false, 1)
+		g.clear(lines, true)
+	}
+	tSpin(0) // pila 4, sin líneas
+	tSpin(1) // pila 5 -> 4
+	g.pause("player_request", 30*time.Second)
+	// Tetris con la pila en 4: el tablero queda vacío.
+	g.wait(2 * time.Second)
+	g.spawn("I")
+	g.move("left")
+	g.place(true, 0)
+	g.clear(4, false)
+	tetrisFill(g, "S", "Z") // pila 2
+	tSpin(2)                // pila 3 -> 1
+	for _, p := range []string{"O", "L", "J", "S", "Z", "I", "O"} {
+		g.wait(2 * time.Second)
+		g.spawn(p)
+		g.place(false, 3)
+		g.clear(0, false)
+		if g.stack >= 20 {
+			break
+		}
+	}
+	g.topOut()
+	return scripted(g.finish(), "perfect clear + T-spin master: 3 T-spins y un tetris que deja el tablero vacío")
 }

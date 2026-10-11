@@ -36,7 +36,7 @@ type Match struct {
 
 // Counts dice cuántas partidas aleatorias generar de cada juego.
 type Counts struct {
-	Racing, Football, Fighting int
+	Racing, Football, Fighting, Tetris int
 }
 
 // Generate crea los escenarios guionizados (siempre) y las partidas
@@ -58,6 +58,11 @@ func Generate(seed int64, n Counts) []Match {
 		id := fmt.Sprintf("fight-s%d-%03d", seed, i)
 		start := baseTime.Add(time.Duration(i) * 10 * time.Minute)
 		matches = append(matches, generateFighting(r, id, start))
+	}
+	for i := 1; i <= n.Tetris; i++ {
+		id := fmt.Sprintf("tetris-s%d-%03d", seed, i)
+		start := baseTime.Add(time.Duration(i) * 20 * time.Minute)
+		matches = append(matches, generateTetris(r, id, start))
 	}
 	return matches
 }

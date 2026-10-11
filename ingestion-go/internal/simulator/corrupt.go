@@ -2,8 +2,10 @@ package simulator
 
 import (
 	"math/rand"
+	"sort"
 
 	"gamestats/ingestion/internal/model"
+	"gamestats/ingestion/internal/validation"
 )
 
 // Corrupt agrega eventos dañados a propósito para demostrar la validación.
@@ -52,18 +54,31 @@ func damage(r *rand.Rand, e model.Event) model.Event {
 		bad.Type = "PLAYER_DANCED"
 	case 4: // regla 5: falta playerId (se fuerza un tipo que lo exige)
 		bad.Type, bad.Action, bad.PlayerID = "PLAYER_LEFT", "", ""
-	case 5: // regla 6: acción que existe, pero en el otro juego
+	case 5: // regla 6: acción que existe, pero en otro juego
 		bad.Type = "PLAYER_ACTION"
 		if bad.PlayerID == "" {
 			bad.PlayerID = "p1"
 		}
-		if e.GameID == "racing" {
-			bad.Action = "GOAL"
-		} else {
-			bad.Action = "LAP_COMPLETED"
-		}
+		bad.Action = actionOfAnotherGame(r, e.GameID)
 	case 6: // regla 7: action en un evento que no es PLAYER_ACTION
 		bad.Type, bad.Action = "MATCH_STARTED", "LAP_COMPLETED"
 	}
 	return bad
+}
+
+// actionOfAnotherGame elige al azar una acción del catálogo que NO es del
+// juego gameID. Se ordena la lista porque recorrer un map en Go no tiene un
+// orden fijo, y el simulador tiene que ser determinista.
+func actionOfAnotherGame(r *rand.Rand, gameID string) string {
+	var others []string
+	for game, actions := range validation.GameActions {
+		if game == gameID {
+			continue
+		}
+		for action := range actions {
+			others = append(others, action)
+		}
+	}
+	sort.Strings(others)
+	return others[r.Intn(len(others))]
 }

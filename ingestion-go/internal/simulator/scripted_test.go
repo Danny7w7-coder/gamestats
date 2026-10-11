@@ -24,8 +24,8 @@ func scriptedFor(t *testing.T, gameID string) map[string]Match {
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
 	ms := Generate(42, Counts{})
-	if len(ms) != 11 {
-		t.Fatalf("escenarios = %d, se esperaban 11", len(ms))
+	if len(ms) != 13 {
+		t.Fatalf("escenarios = %d, se esperaban 13", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -33,8 +33,8 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1})); got != 11+2+3+1 {
-		t.Fatalf("partidas = %d, se esperaban 17", got)
+	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1, Tetris: 1})); got != 13+2+3+1+1 {
+		t.Fatalf("partidas = %d, se esperaban 20", got)
 	}
 }
 
@@ -338,5 +338,67 @@ func TestScriptedFighting(t *testing.T) {
 	}
 	if !paused {
 		t.Errorf("comeback: sin pausa")
+	}
+}
+
+// tetrisSummary cuenta, en una partida de tetris, las líneas de cada
+// limpieza (en orden), los T-spins, los ALL_CLEAR, los HOLD, las pausas y los
+// niveles a los que subió.
+type tetrisSummary struct {
+	clears                   []int
+	tSpins, allClears, holds int
+	pauses                   int
+	levels                   []int
+}
+
+func summarizeTetris(t *testing.T, m Match) tetrisSummary {
+	t.Helper()
+	var s tetrisSummary
+	for _, e := range m.Events {
+		switch {
+		case e.Type == "MATCH_PAUSED":
+			s.pauses++
+		case e.Action == "LINES_CLEARED":
+			s.clears = append(s.clears, int(data(t, e)["lines"].(float64)))
+		case e.Action == "T_SPIN":
+			s.tSpins++
+		case e.Action == "ALL_CLEAR":
+			s.allClears++
+		case e.Action == "HOLD":
+			s.holds++
+		case e.Action == "LEVEL_UP":
+			s.levels = append(s.levels, int(data(t, e)["level"].(float64)))
+		}
+	}
+	return s
+}
+
+func TestScriptedTetris(t *testing.T) {
+	tetris := scriptedFor(t, "tetris")
+
+	// Back-to-back: dos tetris seguidos (con HOLD), un T-spin doble, sube al
+	// nivel 2 y sin ALL_CLEAR.
+	b2b := summarizeTetris(t, tetris["b2b"])
+	if !reflect.DeepEqual(b2b.clears, []int{4, 4, 2}) || b2b.holds != 1 || b2b.allClears != 0 || !reflect.DeepEqual(b2b.levels, []int{2}) {
+		t.Errorf("b2b: %+v", b2b)
+	}
+
+	// Perfect clear + T-spin master: 3 T-spins, un ALL_CLEAR y una pausa.
+	pc := summarizeTetris(t, tetris["perfect"])
+	if pc.tSpins != 3 || pc.allClears != 1 || pc.pauses != 1 {
+		t.Errorf("perfect: %+v", pc)
+	}
+
+	// Entre los dos escenarios se usan las 13 acciones.
+	used := map[string]bool{}
+	for _, m := range tetris {
+		for _, e := range m.Events {
+			used[e.Action] = true
+		}
+	}
+	for action := range validation.GameActions["tetris"] {
+		if !used[action] {
+			t.Errorf("ningún escenario de tetris usa %s", action)
+		}
 	}
 }
