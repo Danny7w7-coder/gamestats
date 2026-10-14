@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "results.schema.json",
   "title": "GameStats MatchAnalysis (salida de Scala)",
-  "description": "Respuesta 200 de POST /analyze y cada elemento de GET /results. score y teamStats solo aparecen en football.",
+  "description": "Respuesta 200 de POST /analyze y cada elemento de GET /results.",
   "type": "object",
   "required": ["matchId", "gameId", "matchStats", "playerStats", "patterns"],
   "properties": {
@@ -18,23 +18,24 @@
         "eventsByAction":  { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "winner": {
           "type": ["string", "null"],
-          "description": "racing: playerId (ranking.head). football: teamId. fighting: playerId con más rounds ganados. tetris: siempre null (un solo jugador). Empate o sin datos: null."
-        },
-        "score": {
-          "type": "object",
-          "description": "Solo football. Goles por teamId; un equipo sin goles aparece con 0.",
-          "additionalProperties": { "type": "integer", "minimum": 0 }
+          "description": "racing: playerId (ranking.head). fighting: playerId con más rounds ganados. connect4: playerId que hizo CONNECT_FOUR. tetris: siempre null (un solo jugador). Empate o sin datos: null."
         }
       }
     },
-    "teamStats": {
-      "type": "array",
-      "description": "Solo football.",
-      "items": { "$ref": "#/$defs/entityMetrics", "required": ["teamId", "metrics"], "properties": { "teamId": { "type": "string" } } }
-    },
     "playerStats": {
       "type": "array",
-      "items": { "$ref": "#/$defs/entityMetrics", "required": ["playerId", "metrics"], "properties": { "playerId": { "type": "string" } } }
+      "items": {
+        "type": "object",
+        "required": ["playerId", "metrics"],
+        "properties": {
+          "playerId": { "type": "string" },
+          "metrics": {
+            "type": "object",
+            "description": "Métricas numéricas por nombre. racing: bestLapMs, avgLapMs, consistency, penaltySeconds, effectiveTimeMs, overtakes, collisions, lapsLed. fighting: damageDealt, accuracy, maxCombo, blocks, knockdowns, roundsWon. connect4: discs, threatsCreated, threatsBlocked, centerControl, hintsUsed, undos, turnTimeouts. tetris: score, lines, tetrises, piecesPlaced, piecesPerMinute, maxLevel, maxCombo, tSpins, hardDrops.",
+            "additionalProperties": { "type": "number" }
+          }
+        }
+      }
     },
     "patterns": {
       "type": "array",
@@ -42,21 +43,9 @@
         "type": "object",
         "required": ["rule", "playerId", "description"],
         "properties": {
-          "rule":        { "type": "string", "examples": ["COMEBACK", "CLEAN_RACE", "ITEM_MASTER", "HAT_TRICK", "CLEAN_SHEET", "FLAWLESS_VICTORY", "FATALITY", "BACK_TO_BACK", "PERFECT_CLEAR", "T_SPIN_MASTER"] },
-          "playerId":    { "type": ["string", "null"], "description": "null en patrones de equipo (COMEBACK y CLEAN_SHEET de football)." },
+          "rule":        { "type": "string", "examples": ["COMEBACK", "CLEAN_RACE", "WIRE_TO_WIRE", "FLAWLESS_VICTORY", "COMBO_MASTER", "DOUBLE_THREAT", "QUICK_WIN", "PERFECT_DEFENSE", "BACK_TO_BACK", "PERFECT_CLEAR", "T_SPIN_MASTER"] },
+          "playerId":    { "type": ["string", "null"], "description": "Jugador del patrón (todos los patrones actuales son de un jugador)." },
           "description": { "type": "string" }
-        }
-      }
-    }
-  },
-  "$defs": {
-    "entityMetrics": {
-      "type": "object",
-      "properties": {
-        "metrics": {
-          "type": "object",
-          "description": "Métricas numéricas por nombre. racing: bestLapMs, avgLapMs, consistency, penaltySeconds, effectiveTimeMs, overtakes, itemsPicked, itemsUsed, boostsUsed, collisions. football (jugador): goals, assists, passAccuracy, shots, shotEffectiveness, powerShots, saves, recoveries, dribblesWon. football (equipo): goals, fouls, corners. fighting: damageDealt, accuracy, maxCombo, specials, blocks, comboBreakers, knockdowns, roundsWon. tetris: score, lines, tetrises, piecesPlaced, piecesPerMinute, maxLevel, maxCombo, tSpins, hardDrops.",
-          "additionalProperties": { "type": "number" }
         }
       }
     }
