@@ -28,7 +28,6 @@ object TetrisAnalyzer extends GameAnalyzer:
       matchId = batch.matchId,
       gameId = gameId,
       matchStats = GenericStats.matchStats(batch), // winner = None: se juega solo
-      teamStats = None,
       playerStats = batch.players.map(p => PlayerStats(p, metrics(byPlayer.getOrElse(p, Nil), minutes, start))),
       patterns = Nil
     )

@@ -23,7 +23,7 @@ class ResultStoreSuite extends munit.FunSuite:
   def open(dir: Path): ResultStore.Opened = ResultStore.open(dir).fold(fail(_), identity)
 
   tempDir.test("encode y decodeAnalysis son inversos (ida y vuelta)"): _ =>
-    List("racing_match_ok.json", "comeback_case.json", "football_match_ok.json", "football_comeback.json")
+    List("racing_match_ok.json", "comeback_case.json", "fighting_match_ok.json", "connect4_vs_bot.json", "tetris_match_ok.json")
       .map(analyzed)
       .foreach(a => assertEquals(Codecs.decodeAnalysis(Codecs.encode(a)), Right(a)))
 
@@ -42,12 +42,12 @@ class ResultStoreSuite extends munit.FunSuite:
 
   tempDir.test("al reabrir se cargan los resultados guardados (sobrevive un reinicio)"): dir =>
     val first = open(dir).store
-    val foot  = analyzed("football_comeback.json")
+    val c4    = analyzed("connect4_match_ok.json")
     val race  = analyzed("racing_match_ok.json")
-    first.save(foot)
     first.save(race)
+    first.save(c4)
     val reopened = open(dir)
-    assertEquals(reopened.store.all, List(foot, race)) // ordenados por matchId
+    assertEquals(reopened.store.all, List(c4, race)) // ordenados por matchId
     assertEquals(reopened.skipped, Nil)
 
   tempDir.test("guardar la misma partida dos veces la reemplaza"): dir =>

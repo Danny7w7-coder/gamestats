@@ -12,15 +12,7 @@ enum EventType:
     case MatchStarted | MatchFinished | MatchPaused | MatchResumed => false
     case PlayerJoined | PlayerLeft | PlayerDisconnected | PlayerReconnected | PlayerAction => true
 
-enum Card:
-  case None, Yellow, Red
-
-/** Objetos de racing. `key` es el nombre con el que viajan en el JSON. */
-enum Item(val key: String):
-  case Boost  extends Item("boost")
-  case Shield extends Item("shield")
-  case Oil    extends Item("oil")
-
+/** `key` es el nombre con el que viaja cada valor en el JSON. */
 enum DnfReason(val key: String):
   case Crash        extends DnfReason("crash")
   case Mechanical   extends DnfReason("mechanical")
@@ -28,14 +20,24 @@ enum DnfReason(val key: String):
 
 /** Golpes básicos de fighting. */
 enum Move(val key: String):
-  case Punch    extends Move("punch")
-  case Kick     extends Move("kick")
-  case Uppercut extends Move("uppercut")
+  case Punch extends Move("punch")
+  case Kick  extends Move("kick")
 
 /** Cómo se ganó un round: por KO o porque se acabó el tiempo. */
 enum WinMethod(val key: String):
   case Ko      extends WinMethod("ko")
   case Timeout extends WinMethod("timeout")
+
+/** Cómo terminó empatado un round: los dos en 0 a la vez, o tiempo con la misma vida. */
+enum DrawMethod(val key: String):
+  case DoubleKo extends DrawMethod("double_ko")
+  case Timeout  extends DrawMethod("timeout")
+
+/** Dirección del 4 en línea ganador. */
+enum Line(val key: String):
+  case Horizontal extends Line("horizontal")
+  case Vertical   extends Line("vertical")
+  case Diagonal   extends Line("diagonal")
 
 /** Las 7 piezas de tetris; `key` es la letra con la que viajan en el JSON. */
 enum Piece(val key: String):
@@ -67,34 +69,22 @@ sealed trait GameAction:
     case _: Penalty          => "PENALTY"
     case _: Overtake         => "OVERTAKE"
     case _: Lapped           => "LAPPED"
-    case _: ItemPickup       => "ITEM_PICKUP"
-    case _: ItemUsed         => "ITEM_USED"
-    case _: Drift            => "DRIFT"
     case _: Collision        => "COLLISION"
-    case _: Spin             => "SPIN"
     case _: Respawn          => "RESPAWN"
     case _: Dnf              => "DNF"
-    case _: Pass             => "PASS"
-    case _: Shot             => "SHOT"
-    case _: PowerShot        => "POWER_SHOT"
-    case _: Goal             => "GOAL"
-    case _: OwnGoal          => "OWN_GOAL"
-    case _: Foul             => "FOUL"
-    case _: Save             => "SAVE"
-    case _: Tackle           => "TACKLE"
-    case _: Interception     => "INTERCEPTION"
-    case _: Dribble          => "DRIBBLE"
-    case _: Corner           => "CORNER"
     case _: Attack           => "ATTACK"
-    case _: SpecialMove      => "SPECIAL_MOVE"
     case _: Combo            => "COMBO"
-    case _: Throw            => "THROW"
     case _: Block            => "BLOCK"
-    case _: ComboBreaker     => "COMBO_BREAKER"
     case _: Knockdown        => "KNOCKDOWN"
-    case _: FatalBlow        => "FATAL_BLOW"
     case _: RoundWon         => "ROUND_WON"
-    case _: Fatality         => "FATALITY"
+    case _: RoundDraw        => "ROUND_DRAW"
+    case _: DiscDropped      => "DISC_DROPPED"
+    case _: ThreatCreated    => "THREAT_CREATED"
+    case _: ThreatBlocked    => "THREAT_BLOCKED"
+    case _: ConnectFour      => "CONNECT_FOUR"
+    case _: TurnTimeout      => "TURN_TIMEOUT"
+    case _: Undo             => "UNDO"
+    case _: HintUsed         => "HINT_USED"
     case _: PieceSpawned     => "PIECE_SPAWNED"
     case _: PieceMoved       => "PIECE_MOVED"
     case _: PieceRotated     => "PIECE_ROTATED"
@@ -116,41 +106,30 @@ case class PositionChanged(from: Int, to: Int, lap: Int)            extends Game
 case class Penalty(seconds: Int, reason: String)                    extends GameAction
 case class Overtake(lap: Int, overtakenId: String)                  extends GameAction
 case class Lapped(lap: Int, lappedId: String)                       extends GameAction
-case class ItemPickup(lap: Int, item: Item)                         extends GameAction
-/** `durationMs` solo lo trae el boost (nitro). */
-case class ItemUsed(lap: Int, item: Item, durationMs: Option[Long]) extends GameAction
-case class Drift(lap: Int, corner: Int, durationMs: Long)           extends GameAction
 case class Collision(lap: Int, otherId: String, damage: Int)        extends GameAction
-case class Spin(lap: Int, corner: Int)                              extends GameAction
 case class Respawn(lap: Int, position: Int)                         extends GameAction
 case class Dnf(lap: Int, reason: DnfReason)                         extends GameAction
 
-// Football
-case class Pass(teamId: String, targetId: String, success: Boolean, distance: Double, minute: Int) extends GameAction
-case class Shot(teamId: String, onTarget: Boolean, minute: Int)                                    extends GameAction
-case class Goal(teamId: String, assistId: Option[String], minute: Int)                             extends GameAction
-case class Foul(teamId: String, card: Card, minute: Int, targetId: Option[String])                 extends GameAction
-case class PowerShot(teamId: String, onTarget: Boolean, minute: Int)                               extends GameAction
-/** `teamId` es el equipo de quien lo hace: el gol cuenta para el rival. */
-case class OwnGoal(teamId: String, minute: Int)                                                    extends GameAction
-case class Save(teamId: String, minute: Int)                                                       extends GameAction
-case class Tackle(teamId: String, targetId: String, success: Boolean, minute: Int)                 extends GameAction
-case class Interception(teamId: String, minute: Int)                                               extends GameAction
-case class Dribble(teamId: String, success: Boolean, minute: Int)                                  extends GameAction
-case class Corner(teamId: String, minute: Int)                                                     extends GameAction
+// Fighting (pelea básica 1 contra 1 por rounds)
+case class Attack(targetId: String, move: Move, hit: Boolean, damage: Int, round: Int) extends GameAction
+case class Combo(targetId: String, hits: Int, damage: Int, round: Int)                extends GameAction
+case class Block(attackerId: String, round: Int)                                      extends GameAction
+case class Knockdown(targetId: String, round: Int)                                    extends GameAction
+case class RoundWon(round: Int, remainingHealth: Int, method: WinMethod)              extends GameAction
+/** Round empatado entre quien lo manda y `otherId`: no suma para nadie. */
+case class RoundDraw(round: Int, method: DrawMethod, otherId: String)                 extends GameAction
 
-// Fighting (estilo Mortal Kombat)
-case class Attack(targetId: String, move: Move, hit: Boolean, damage: Int, round: Int)              extends GameAction
-case class SpecialMove(targetId: String, name: String, hit: Boolean, damage: Int, round: Int)       extends GameAction
-case class Combo(targetId: String, hits: Int, damage: Int, round: Int)                             extends GameAction
-case class Throw(targetId: String, damage: Int, round: Int)                                        extends GameAction
-case class Block(attackerId: String, round: Int)                                                   extends GameAction
-case class ComboBreaker(attackerId: String, round: Int)                                            extends GameAction
-case class Knockdown(targetId: String, round: Int)                                                 extends GameAction
-/** `health` es la vida de quien lo usa (máximo 30: solo se puede con poca vida). */
-case class FatalBlow(targetId: String, hit: Boolean, damage: Int, health: Int, round: Int)         extends GameAction
-case class RoundWon(round: Int, remainingHealth: Int, method: WinMethod)                           extends GameAction
-case class Fatality(targetId: String, name: String)                                                extends GameAction
+// Connect4 (4 en línea: 7 columnas × 6 filas, la fila 1 es la de abajo)
+case class DiscDropped(column: Int, row: Int)                        extends GameAction
+/** Casilla vacía que le completaría un 4 en línea al jugador. */
+case class ThreatCreated(column: Int, row: Int)                      extends GameAction
+case class ThreatBlocked(column: Int, row: Int, attackerId: String)  extends GameAction
+case class ConnectFour(line: Line)                                   extends GameAction
+/** Se acabó el tiempo del turno (`seconds` = límite por turno). */
+case class TurnTimeout(seconds: Int)                                 extends GameAction
+/** Deshace la última ficha del tablero (solo contra la IA). */
+case class Undo(column: Int, row: Int)                               extends GameAction
+case class HintUsed(column: Int)                                     extends GameAction
 
 // Tetris (un solo jugador)
 case class PieceSpawned(piece: Piece)                          extends GameAction

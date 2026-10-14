@@ -67,7 +67,7 @@ object AnalyticsRoutes:
     // flatMap: cada partida aporta 0 o 1 entrada; filter se queda solo con este jugador.
     val matches: List[(MatchAnalysis, PlayerStats)] =
       results.flatMap(a => a.playerStats.filter(_.playerId == playerId).map(a -> _))
-    // Patrones personales (los de equipo tienen playerId = None y no entran).
+    // Patrones de este jugador en cualquiera de sus partidas.
     val patterns = results.flatMap(a => a.patterns.filter(_.playerId.contains(playerId)).map(a.matchId -> _))
 
     Option.when(matches.nonEmpty)(

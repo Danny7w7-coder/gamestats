@@ -37,13 +37,13 @@ class RoutesSuite extends munit.FunSuite:
   // --- /players/{playerId} ----------------------------------------------------
 
   val all: List[MatchAnalysis] =
-    List("racing_match_ok.json", "comeback_case.json", "football_match_ok.json").map(analyzed)
+    List("racing_match_ok.json", "comeback_case.json", "connect4_match_ok.json").map(analyzed)
 
   test("playerReport junta las partidas del jugador, de cualquier juego"):
     val r = AnalyticsRoutes.playerReport("p1", all).getOrElse(fail("p1 debería existir"))
     assertEquals(r("matchesPlayed").num, 3.0)
-    assertEquals(r("matches").arr.map(_("matchId").str).toList, List("race-001", "race-002", "foot-001"))
-    assertEquals(r("matches")(2)("metrics")("goals").num, 2.0)
+    assertEquals(r("matches").arr.map(_("matchId").str).toList, List("race-001", "race-002", "c4-001"))
+    assertEquals(r("matches")(2)("metrics")("discs").num, 10.0)
 
   test("playerReport incluye los patrones personales del jugador"):
     val r = AnalyticsRoutes.playerReport("p3", all).getOrElse(fail("p3 debería existir"))

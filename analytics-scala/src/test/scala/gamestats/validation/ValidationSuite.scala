@@ -56,14 +56,14 @@ class ValidationSuite extends munit.FunSuite:
       batch(
         act("ok", data = ujson.Obj("targetId" -> "p2")),
         act("mismo", data = ujson.Obj("otherId" -> "p1")),
-        act("nadie", data = ujson.Obj("assistId" -> "p9"))
+        act("nadie", data = ujson.Obj("attackerId" -> "p9"))
       ),
       ContextCheck.NoCheck
     )
     assertEquals(ids(b), List("ok"))
     assertEquals(b.skipped, List(
       "mismo: 'otherId' es el mismo jugador que hace la acción",
-      "nadie: 'assistId' ('p9') no es un jugador de la partida"
+      "nadie: 'attackerId' ('p9') no es un jugador de la partida"
     ))
 
   // --- Reglas propias de un juego ---------------------------------------------------
@@ -98,8 +98,10 @@ class ValidationSuite extends munit.FunSuite:
 
   // --- Integración con el lote real ---------------------------------------------------
 
-  test("los fixtures que ya existían no pierden ningún evento"):
-    for name <- List("racing_match_ok.json", "comeback_case.json", "football_match_ok.json", "football_comeback.json") do
+  test("los fixtures válidos no pierden ningún evento"):
+    for name <- List("racing_match_ok.json", "comeback_case.json", "racing_full_ok.json", "fighting_match_ok.json",
+                     "fighting_comeback.json", "connect4_match_ok.json", "connect4_vs_bot.json", "connect4_draw.json",
+                     "tetris_match_ok.json", "tetris_perfect_clear.json") do
       val b = AnalyticsRoutes.parseBody(Fixtures.text(name)).fold(fail(_), identity)
       assertEquals(b.skipped, Nil, name)
 
