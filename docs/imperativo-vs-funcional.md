@@ -16,7 +16,7 @@ El módulo de ingestión (`ingestion-go/`, unas 1700 líneas más unas 1400 de t
 - **Errores como valores** (`error`), revisados en el momento con `if err != nil`, sin excepciones.
 - **Código directo**: ciclos, `switch` y `return` temprano, sin abstracciones que no hagan falta.
 
-El estado mutable quedó en cuatro lugares: el mapa del router (`pipeline/dispatcher.go`), el slice de eventos de cada partida (`collect`, en el mismo archivo), el store de partidas (`state/match_store.go`) y el log de rechazados (`rejected/log.go`). Los dos primeros los toca una sola goroutine; los dos últimos están protegidos con un mutex.
+El estado mutable quedó en cuatro lugares: el mapa del router (`pipeline/dispatcher.go`), el slice de eventos de cada partida (`collect`, en el mismo archivo), el store de partidas (`state/match_store.go`) y el log de rechazados (`rejected/log.go`, que también escribe el de acciones desconocidas). Los dos primeros los toca una sola goroutine; los dos últimos están protegidos con un mutex.
 
 ### Ventajas
 
