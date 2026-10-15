@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -23,6 +24,7 @@ const maxBodyBytes = 1 << 20
 // Handler agrupa los endpoints y lo que necesitan para trabajar.
 type Handler struct {
 	Rejected *rejected.Logger     // donde se anotan los eventos rechazados
+	Unknown  *rejected.Logger     // donde se anotan los avisos de acciones desconocidas (puede ser nil)
 	Store    *state.MatchStore    // estado de las partidas (solo lectura aquí)
 	Pipeline *pipeline.Dispatcher // a donde van los eventos válidos
 }
@@ -33,11 +35,13 @@ type rejection struct {
 	Reason  string `json:"reason"`
 }
 
-// eventsResponse es la respuesta de POST /events.
+// eventsResponse es la respuesta de POST /events. Warnings lista los
+// eventos aceptados con una acción desconocida; si no hay, no aparece.
 type eventsResponse struct {
 	Received int         `json:"received"`
 	Accepted int         `json:"accepted"`
 	Rejected []rejection `json:"rejected"`
+	Warnings []rejection `json:"warnings,omitempty"`
 }
 
 // Health responde {"status":"ok"} para indicar que el servidor está vivo.
@@ -87,6 +91,9 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 		resp.Accepted++
 		log.Printf("evento aceptado: matchId=%s eventId=%s type=%s action=%s",
 			e.MatchID, e.EventID, e.Type, e.Action)
+		if validation.UnknownAction(e) {
+			h.warn(&resp, raw, e)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -104,6 +111,21 @@ func (h *Handler) reject(resp *eventsResponse, raw json.RawMessage, eventID, rea
 	log.Printf("evento rechazado: eventId=%s motivo=%s", eventID, reason)
 	if err := h.Rejected.Log(raw, reason); err != nil {
 		log.Printf("no se pudo escribir en el log de rechazados: %v", err)
+	}
+}
+
+// warn anota un evento aceptado cuya acción no está en el catálogo: va a la
+// respuesta y a unknown_actions.jsonl. No es un error: el evento sigue su
+// camino a Scala, que lo cuenta como acción desconocida.
+func (h *Handler) warn(resp *eventsResponse, raw json.RawMessage, e model.Event) {
+	reason := fmt.Sprintf("acción desconocida %q en el juego %q (se acepta)", e.Action, e.GameID)
+	resp.Warnings = append(resp.Warnings, rejection{EventID: e.EventID, Reason: reason})
+	log.Printf("aviso: eventId=%s %s", e.EventID, reason)
+	if h.Unknown == nil {
+		return
+	}
+	if err := h.Unknown.Log(raw, reason); err != nil {
+		log.Printf("no se pudo escribir en el log de acciones desconocidas: %v", err)
 	}
 }
 
