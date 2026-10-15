@@ -117,9 +117,9 @@ func data(t *testing.T, e model.Event) map[string]any {
 }
 
 // checkRacing revisa las reglas de contexto de racing (las mismas que
-// aplica Scala): vueltas dentro del total, from ≠ to, un objeto a la vez,
-// RESPAWN solo tras un choque o trompo propio en esa vuelta, nada después de
-// un DNF y el que abandona no va en el ranking.
+// aplica Scala): vueltas dentro del total, from ≠ to, RESPAWN solo tras un
+// choque en esa vuelta en el que participó el piloto (uno por choque), nada
+// después de un DNF y el que abandona no va en el ranking.
 func checkRacing(t *testing.T, m Match) {
 	t.Helper()
 	start := data(t, m.Events[0])
@@ -129,8 +129,7 @@ func checkRacing(t *testing.T, m Match) {
 	}
 
 	drivers := 0
-	hand := map[string]string{}  // objeto que tiene cada piloto en la mano
-	incident := map[string]int{} // vuelta del último choque o trompo sin RESPAWN
+	crashed := map[string]int{}  // vuelta del último choque de cada piloto sin RESPAWN
 	out := map[string]bool{}     // pilotos que abandonaron
 	lapsDone := map[string]int{} // LAP_COMPLETED de cada piloto
 
@@ -159,26 +158,14 @@ func checkRacing(t *testing.T, m Match) {
 			if d["from"] == d["to"] {
 				t.Fatalf("%s: %s con from = to", m.ID, e.EventID)
 			}
-		case "ITEM_PICKUP":
-			if hand[p] != "" {
-				t.Fatalf("%s: %s agarra un objeto con %s en la mano", m.ID, e.EventID, hand[p])
-			}
-			hand[p] = d["item"].(string)
-		case "ITEM_USED":
-			if hand[p] != d["item"] {
-				t.Fatalf("%s: %s usa %v pero tiene %q", m.ID, e.EventID, d["item"], hand[p])
-			}
-			if _, ok := d["durationMs"]; d["item"] == "boost" && !ok {
-				t.Fatalf("%s: %s es un nitro sin durationMs", m.ID, e.EventID)
-			}
-			delete(hand, p)
-		case "COLLISION", "SPIN":
-			incident[p] = lap
+		case "COLLISION": // participan los dos: el que choca y el chocado
+			crashed[p] = lap
+			crashed[d["otherId"].(string)] = lap
 		case "RESPAWN":
-			if l, ok := incident[p]; !ok || l != lap {
-				t.Fatalf("%s: %s sin choque o trompo antes en esa vuelta", m.ID, e.EventID)
+			if l, ok := crashed[p]; !ok || l != lap {
+				t.Fatalf("%s: %s sin un choque suyo antes en esa vuelta", m.ID, e.EventID)
 			}
-			delete(incident, p)
+			delete(crashed, p)
 		case "DNF":
 			out[p] = true
 		case "LAP_COMPLETED":

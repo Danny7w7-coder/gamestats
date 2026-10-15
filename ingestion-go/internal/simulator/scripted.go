@@ -19,7 +19,7 @@ func scriptedMatches(seed int64) []Match {
 		raceComeback(id("race", "comeback"), scriptBase),
 		racePenaltyChangesResult(id("race", "penalty"), scriptBase.Add(10*time.Minute)),
 		raceClean(id("race", "clean"), scriptBase.Add(20*time.Minute)),
-		raceItemMaster(id("race", "items"), scriptBase.Add(30*time.Minute)),
+		raceWireToWire(id("race", "wire"), scriptBase.Add(30*time.Minute)),
 		racePauseDNF(id("race", "dnf"), scriptBase.Add(40*time.Minute)),
 		footballComeback(id("foot", "comeback"), scriptBase.Add(1*time.Hour)),
 		footballDraw(id("foot", "draw"), scriptBase.Add(3*time.Hour)),
@@ -75,50 +75,34 @@ func raceClean(id string, start time.Time) Match {
 		{80500, 87000, 82500, 83000}, // p2 pierde 5.5 s por el choque
 		{80500, 81500, 82000, 83000},
 	}
-	actions := []raceAction{
-		{driver: 0, lap: 1, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 1, "corner": 3, "durationMs": 1800}},
-		{driver: 0, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "boost"}},
-		{driver: 0, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "boost", "durationMs": 2500}},
-		{driver: 1, lap: 2, at: 0.45, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p3", "damage": 40}},
-		{driver: 1, lap: 2, at: 0.47, action: "RESPAWN"},
-		{driver: 3, lap: 3, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 3, "corner": 6, "durationMs": 1200}},
-	}
+	crashes := []raceCrash{{driver: 1, other: 2, lap: 2, at: crashAt, damage: 40, respawnDriver: true}}
 	penalties := []racePenalty{{driver: 2, lap: 3, seconds: 5, reason: "corner_cutting"}}
-	m := buildRace(id, start, racePlan{track: "desert_dunes", lapTimes: lapTimes, actions: actions, penalties: penalties})
+	m := buildRace(id, start, racePlan{track: "desert_dunes", lapTimes: lapTimes, crashes: crashes, penalties: penalties})
 	m.Script = "carrera limpia: p1 gana sin choques ni penalizaciones"
 	return m
 }
 
-// raceItemMaster: p2 usa los 3 objetos (nitro, escudo y aceite, uno por
-// vuelta) y gana (ITEM_MASTER). p3 hace un trompo con el aceite y vuelve a la
-// pista. p4 es muy lento: p1 y p2 le sacan una vuelta (LAPPED).
-// Ranking: p2, p1, p3, p4.
-func raceItemMaster(id string, start time.Time) Match {
+// raceWireToWire: p1 sale primero y lidera todas las vueltas, sin perder
+// nunca el primer lugar (WIRE_TO_WIRE). Detrás, p3 pasa a p2 en la vuelta 2,
+// pero en la 3 choca contra p4 y p2 recupera el segundo lugar.
+// Ranking: p1, p2, p3, p4.
+func raceWireToWire(id string, start time.Time) Match {
 	lapTimes := [][]int{
-		//  p1     p2     p3      p4
-		{81000, 80500, 82000, 125000},
-		{81000, 80500, 82000, 125000},
-		{81000, 80500, 87000, 125000}, // p3 pierde 5 s por el trompo
+		//  p1     p2     p3     p4
+		{80000, 81500, 81800, 83000}, // vuelta 1: p1, p2, p3, p4
+		{80200, 82500, 81000, 83200}, // vuelta 2: p1, p3, p2, p4
+		{80100, 81000, 85500, 82800}, // vuelta 3: p3 pierde tiempo por el choque
 	}
-	actions := []raceAction{
-		{driver: 1, lap: 1, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 1, "item": "boost"}},
-		{driver: 1, lap: 1, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 1, "item": "boost", "durationMs": 3000}},
-		{driver: 0, lap: 2, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 2, "corner": 2, "durationMs": 2200}},
-		{driver: 1, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "shield"}},
-		{driver: 1, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "shield"}},
-		{driver: 1, lap: 3, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 3, "item": "oil"}},
-		{driver: 1, lap: 3, at: 0.3, action: "ITEM_USED", data: map[string]any{"lap": 3, "item": "oil"}},
-		{driver: 2, lap: 3, at: 0.45, action: "SPIN", data: map[string]any{"lap": 3, "corner": 5}},
-		{driver: 2, lap: 3, at: 0.47, action: "RESPAWN"},
-	}
-	m := buildRace(id, start, racePlan{track: "jungle_ruins", lapTimes: lapTimes, actions: actions})
-	m.Script = "item master: p2 usa nitro, escudo y aceite; p4 recibe una vuelta (LAPPED)"
+	crashes := []raceCrash{{driver: 2, other: 3, lap: 3, at: crashAt, damage: 30, respawnDriver: true}}
+	m := buildRace(id, start, racePlan{track: "jungle_ruins", lapTimes: lapTimes, crashes: crashes})
+	m.Script = "de punta a punta: p1 lidera todas las vueltas sin perder el primer lugar"
 	return m
 }
 
-// racePauseDNF: en la vuelta 2, p3 (que iba primero) choca con p1, hace un
-// trompo y abandona (DNF). La carrera se pausa 30 s para limpiar la pista.
-// p2 adelanta a p1 y gana. p3 no aparece en el ranking: p2, p1, p4.
+// racePauseDNF: en la vuelta 2, p3 (que iba primero) choca con p1 y
+// abandona (DNF); p1, el chocado, vuelve a la pista (RESPAWN). La carrera se
+// pausa 30 s para limpiar la pista. p2 adelanta a p1 y gana. p3 no aparece
+// en el ranking: p2, p1, p4.
 func racePauseDNF(id string, start time.Time) Match {
 	lapTimes := [][]int{
 		//  p1     p2     p3     p4
@@ -126,12 +110,9 @@ func racePauseDNF(id string, start time.Time) Match {
 		{84000, 81000, 82000, 82500}, // p1 pierde tiempo por el golpe
 		{81000, 80800, 82000, 82500},
 	}
-	actions := []raceAction{
-		{driver: 2, lap: 2, at: 0.4, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p1", "damage": 70}},
-		{driver: 2, lap: 2, at: 0.42, action: "SPIN", data: map[string]any{"lap": 2, "corner": 7}},
-	}
+	crashes := []raceCrash{{driver: 2, other: 0, lap: 2, at: 0.4, damage: 70, respawnOther: true}}
 	plan := racePlan{
-		track: "frozen_peak", lapTimes: lapTimes, actions: actions,
+		track: "frozen_peak", lapTimes: lapTimes, crashes: crashes,
 		dnf:   &raceDNF{driver: 2, lap: 2, reason: "crash"}, // abandona a los 130.0 s
 		pause: &racePause{atMs: 131000, seconds: 30, reason: "crash_cleanup"},
 	}

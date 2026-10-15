@@ -129,38 +129,39 @@ func TestScriptedRacing(t *testing.T) {
 		t.Fatalf("clean: ganador=%v choques=%d penalizaciones=%d", winner, collisions, penalties)
 	}
 
-	// Item master: p2 usa los 3 objetos y gana; alguien le saca una vuelta a p4.
-	items := racing["items"]
-	usedBy := map[string]map[any]bool{}
-	lappedP4 := false
-	for _, e := range items.Events {
-		switch e.Action {
-		case "ITEM_USED":
-			if usedBy[e.PlayerID] == nil {
-				usedBy[e.PlayerID] = map[any]bool{}
-			}
-			usedBy[e.PlayerID][data(t, e)["item"]] = true
-		case "LAPPED":
-			lappedP4 = lappedP4 || data(t, e)["lappedId"] == "p4"
+	// De punta a punta: el ganador (p1) nunca cambia de posición y termina
+	// cada vuelta primero.
+	wire := racing["wire"]
+	if got := finalRanking(t, wire); got[0] != "p1" {
+		t.Fatalf("wire: ranking = %v", got)
+	}
+	for lap := 1; lap <= 3; lap++ {
+		if pos := lapPositions(t, wire, lap); pos["p1"] != 1 {
+			t.Fatalf("wire: p1 en la vuelta %d = %d", lap, pos["p1"])
 		}
 	}
-	if got := finalRanking(t, items); len(usedBy["p2"]) != 3 || !lappedP4 || !reflect.DeepEqual(got, []any{"p2", "p1", "p3", "p4"}) {
-		t.Fatalf("items: objetos de p2=%v, p4 doblado=%v, ranking=%v", usedBy["p2"], lappedP4, got)
+	for _, e := range wire.Events {
+		if e.Action == "POSITION_CHANGED" && e.PlayerID == "p1" {
+			t.Fatalf("wire: p1 cambió de posición en %s", e.EventID)
+		}
 	}
 
-	// Pausa y abandono: hay pausa, p3 abandona y no está en el ranking.
+	// Pausa y abandono: hay pausa, p3 abandona y no está en el ranking, y p1
+	// (el chocado) vuelve a la pista.
 	dnf := racing["dnf"]
-	hasPause, dnfBy := false, ""
+	hasPause, dnfBy, respawnBy := false, "", ""
 	for _, e := range dnf.Events {
-		if e.Type == "MATCH_PAUSED" {
+		switch {
+		case e.Type == "MATCH_PAUSED":
 			hasPause = true
-		}
-		if e.Action == "DNF" {
+		case e.Action == "DNF":
 			dnfBy = e.PlayerID
+		case e.Action == "RESPAWN":
+			respawnBy = e.PlayerID
 		}
 	}
-	if got := finalRanking(t, dnf); !hasPause || dnfBy != "p3" || !reflect.DeepEqual(got, []any{"p2", "p1", "p4"}) {
-		t.Fatalf("dnf: pausa=%v DNF de %q ranking=%v", hasPause, dnfBy, got)
+	if got := finalRanking(t, dnf); !hasPause || dnfBy != "p3" || respawnBy != "p1" || !reflect.DeepEqual(got, []any{"p2", "p1", "p4"}) {
+		t.Fatalf("dnf: pausa=%v DNF de %q RESPAWN de %q ranking=%v", hasPause, dnfBy, respawnBy, got)
 	}
 }
 

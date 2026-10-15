@@ -8,11 +8,10 @@ package validation
 // Las acciones salen del contrato compartido con Scala (contracts/README.md).
 // Los nombres no se repiten entre juegos.
 var GameActions = map[string]map[string]bool{
-	// Carrera arcade estilo Mario Kart (12 acciones).
+	// Carrera arcade por posiciones (8 acciones).
 	"racing": {
 		"LAP_COMPLETED": true, "POSITION_CHANGED": true, "OVERTAKE": true, "LAPPED": true,
-		"ITEM_PICKUP": true, "ITEM_USED": true, "DRIFT": true, "COLLISION": true,
-		"SPIN": true, "RESPAWN": true, "PENALTY": true, "DNF": true,
+		"COLLISION": true, "RESPAWN": true, "PENALTY": true, "DNF": true,
 	},
 	// Fútbol arcade retro 6 vs 6 (11 acciones).
 	"football": {

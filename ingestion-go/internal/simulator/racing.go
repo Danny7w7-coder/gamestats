@@ -10,8 +10,6 @@ var tracks = []string{"neon_city", "rainbow_road", "desert_dunes", "jungle_ruins
 
 var penaltyReasons = []string{"corner_cutting", "track_limits", "dangerous_driving"}
 
-var items = []string{"boost", "shield", "oil"}
-
 var dnfReasons = []string{"crash", "mechanical", "disqualified"}
 
 var pauseReasons = []string{"crash_cleanup", "weather", "technical"}
@@ -23,9 +21,9 @@ type racePlan struct {
 	track     string
 	lapTimes  [][]int // lapTimes[vuelta][piloto], en ms
 	penalties []racePenalty
-	actions   []raceAction // objetos, derrapes, choques, trompos, respawns
-	dnf       *raceDNF     // nil si nadie abandona
-	pause     *racePause   // nil si no hay pausa
+	crashes   []raceCrash
+	dnf       *raceDNF   // nil si nadie abandona
+	pause     *racePause // nil si no hay pausa
 }
 
 // racePenalty es una penalización: a qué piloto (índice), en qué vuelta,
@@ -37,14 +35,16 @@ type racePenalty struct {
 	reason  string
 }
 
-// raceAction es una acción de un piloto dentro de una vuelta. "at" es el
-// momento de la vuelta, como fracción de su tiempo de vuelta (0.5 = a mitad).
-type raceAction struct {
-	driver int
-	lap    int
-	at     float64
-	action string
-	data   map[string]any
+// raceCrash es un choque: driver choca contra other en una vuelta, en el
+// momento "at" de su vuelta (fracción de su tiempo de vuelta: 0.5 = a mitad).
+// Cualquiera de los dos puede volver a la pista con RESPAWN, una vez.
+type raceCrash struct {
+	driver, other int
+	lap           int
+	at            float64
+	damage        int
+	respawnDriver bool // el que chocó vuelve a la pista
+	respawnOther  bool // el chocado vuelve a la pista
 }
 
 // raceDNF: un piloto abandona en una vuelta (al 60 % de ella).
@@ -63,9 +63,10 @@ type racePause struct {
 }
 
 // Momento de la vuelta en que ocurre cada cosa (fracción del tiempo de vuelta).
-// Las acciones van entre 0.1 y 0.47; la penalización a 0.5 y el DNF a 0.6, así
-// un piloto nunca hace nada en la vuelta después de abandonar.
+// Los choques van a 0.45, la penalización a 0.5 y el DNF a 0.6, así un piloto
+// nunca hace nada en la vuelta después de abandonar.
 const (
+	crashAt   = 0.45
 	penaltyAt = 0.5
 	dnfAt     = 0.6
 )
@@ -75,9 +76,8 @@ const (
 // los eventos (vueltas, posiciones, adelantamientos) y los ubica en el tiempo.
 //
 // Reglas de contexto que se cumplen por construcción:
-//   - cada objeto se agarra y se usa en la misma vuelta: nunca se agarra otro
-//     con la mano llena;
-//   - RESPAWN solo justo después de un choque o trompo del mismo piloto;
+//   - RESPAWN solo justo después de un choque en el que participó el piloto
+//     (como el que choca o como el chocado), uno por choque;
 //   - tras un DNF, buildRace no agrega más eventos de ese piloto.
 func generateRacing(r *rand.Rand, id string, start time.Time) Match {
 	drivers := 3 + r.Intn(4) // 3..6
@@ -111,9 +111,12 @@ func generateRacing(r *rand.Rand, id string, start time.Time) Match {
 		plan.dnf = &raceDNF{driver: dnfDriver, lap: 1 + r.Intn(laps), reason: pick(r, dnfReasons)}
 	}
 
+	// Choques: en cada vuelta, cada piloto tiene un 6 % de chocar contra otro.
 	for lap := 1; lap <= laps; lap++ {
 		for d := 0; d < drivers; d++ {
-			plan.actions = append(plan.actions, randomLapActions(r, &plan, d, lap, dnfDriver)...)
+			if r.Intn(100) < 6 {
+				plan.crashes = append(plan.crashes, randomCrash(r, &plan, d, lap, dnfDriver))
+			}
 		}
 	}
 
@@ -140,47 +143,24 @@ func generateRacing(r *rand.Rand, id string, start time.Time) Match {
 	return buildRace(id, start, plan)
 }
 
-// randomLapActions decide qué hace el piloto d en una vuelta: derrapes,
-// objetos y, a veces, un choque o trompo (que le cuesta tiempo).
-func randomLapActions(r *rand.Rand, plan *racePlan, d, lap, dnfDriver int) []raceAction {
-	var acts []raceAction
-	if r.Intn(100) < 40 {
-		acts = append(acts, raceAction{d, lap, 0.1, "DRIFT", map[string]any{
-			"lap": lap, "corner": 1 + r.Intn(8), "durationMs": 1000 + r.Intn(1501),
-		}})
-	}
-	if r.Intn(100) < 35 {
-		item := pick(r, items)
-		used := map[string]any{"lap": lap, "item": item}
-		if item == "boost" { // el nitro dura un tiempo
-			used["durationMs"] = 1500 + r.Intn(2001)
-		}
-		acts = append(acts,
-			raceAction{d, lap, 0.2, "ITEM_PICKUP", map[string]any{"lap": lap, "item": item}},
-			raceAction{d, lap, 0.35, "ITEM_USED", used})
-	}
-	if r.Intn(100) < 6 {
-		// Choque o trompo: el piloto pierde 4 a 8 s en esa vuelta.
-		plan.lapTimes[lap-1][d] += 4000 + r.Intn(4001)
-		var others []int
-		for o := range plan.lapTimes[0] {
-			if o != d && o != dnfDriver {
-				others = append(others, o)
-			}
-		}
-		if len(others) > 0 && r.Intn(2) == 0 {
-			acts = append(acts, raceAction{d, lap, 0.45, "COLLISION", map[string]any{
-				"lap": lap, "otherId": playerIDs(len(plan.lapTimes[0]))[others[r.Intn(len(others))]],
-				"damage": 10 + r.Intn(51),
-			}})
-		} else {
-			acts = append(acts, raceAction{d, lap, 0.45, "SPIN", map[string]any{"lap": lap, "corner": 1 + r.Intn(8)}})
-		}
-		if r.Intn(100) < 70 { // casi siempre vuelve a la pista
-			acts = append(acts, raceAction{d, lap, 0.47, "RESPAWN", nil}) // buildRace pone la posición
+// randomCrash arma un choque del piloto d contra otro al azar (nunca contra
+// el que va a abandonar, para no nombrarlo después de su DNF). El que choca
+// pierde 4 a 8 s en esa vuelta. Casi siempre vuelve a la pista; el chocado,
+// a veces.
+func randomCrash(r *rand.Rand, plan *racePlan, d, lap, dnfDriver int) raceCrash {
+	plan.lapTimes[lap-1][d] += 4000 + r.Intn(4001)
+	var others []int
+	for o := range plan.lapTimes[0] {
+		if o != d && o != dnfDriver {
+			others = append(others, o)
 		}
 	}
-	return acts
+	return raceCrash{
+		driver: d, other: others[r.Intn(len(others))], lap: lap, at: crashAt,
+		damage:        10 + r.Intn(61),
+		respawnDriver: r.Intn(100) < 70,
+		respawnOther:  r.Intn(100) < 30,
+	}
 }
 
 // buildRace arma los eventos de una carrera a partir de su plan. La usan
@@ -225,15 +205,25 @@ func buildRace(id string, start time.Time, plan racePlan) Match {
 			return lapStart[driver] + int(frac*float64(times[driver]))
 		}
 
-		for _, a := range plan.actions {
-			if a.lap != lap || race.out[a.driver] {
+		// Choques. Los RESPAWN van 1 y 2 s después del choque (y no en la
+		// vuelta del chocado, que puede ir en otra parte de la pista): así
+		// siempre quedan después del COLLISION. Vuelven a la pista en la
+		// posición que tenían.
+		for _, c := range plan.crashes {
+			if c.lap != lap || race.out[c.driver] || race.out[c.other] {
 				continue
 			}
-			data := a.data
-			if a.action == "RESPAWN" { // vuelve a la pista en la posición que tenía
-				data = map[string]any{"lap": lap, "position": race.pos[a.driver]}
+			at := atLap(c.driver, c.at)
+			b.add(clock(at), "PLAYER_ACTION", drivers[c.driver], "COLLISION",
+				map[string]any{"lap": lap, "otherId": drivers[c.other], "damage": c.damage})
+			if c.respawnDriver {
+				b.add(clock(at+1000), "PLAYER_ACTION", drivers[c.driver], "RESPAWN",
+					map[string]any{"lap": lap, "position": race.pos[c.driver]})
 			}
-			b.add(clock(atLap(a.driver, a.at)), "PLAYER_ACTION", drivers[a.driver], a.action, data)
+			if c.respawnOther {
+				b.add(clock(at+2000), "PLAYER_ACTION", drivers[c.other], "RESPAWN",
+					map[string]any{"lap": lap, "position": race.pos[c.other]})
+			}
 		}
 
 		for _, pen := range plan.penalties {
