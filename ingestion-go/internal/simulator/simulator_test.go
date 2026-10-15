@@ -14,7 +14,7 @@ import (
 )
 
 func TestSameSeedSameMatches(t *testing.T) {
-	n := Counts{Racing: 3, Football: 3, Fighting: 3, Tetris: 3}
+	n := Counts{Racing: 3, Connect4: 3, Fighting: 3, Tetris: 3}
 	a := Generate(42, n)
 	b := Generate(42, n)
 	if !reflect.DeepEqual(a, b) {
@@ -28,13 +28,13 @@ func TestSameSeedSameMatches(t *testing.T) {
 // Revisa muchas semillas para atrapar casos raros.
 func TestGeneratedMatchesFollowTheRules(t *testing.T) {
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, Counts{Racing: 2, Football: 2, Fighting: 2, Tetris: 2}) {
+		for _, m := range Generate(seed, Counts{Racing: 2, Connect4: 2, Fighting: 2, Tetris: 2}) {
 			checkCommon(t, m)
 			switch m.GameID {
 			case "racing":
 				checkRacing(t, m)
-			case "football":
-				checkFootball(t, m)
+			case "connect4":
+				checkConnect4(t, m)
 			case "fighting":
 				checkFighting(t, m)
 			case "tetris":
@@ -208,85 +208,186 @@ func TestRacingUsesAllActions(t *testing.T) {
 	}
 }
 
-// checkFootball revisa las reglas de contexto de football (las mismas que
-// aplica Scala): 6 por equipo y todos entran antes de jugar, el teamId de
-// cada acción es el de su equipo, todo GOAL va precedido de un tiro al arco
-// del mismo jugador (≥1 s antes), pases y asistencias entre compañeros, y
-// nada después de una roja.
-func checkFootball(t *testing.T, m Match) {
-	t.Helper()
-	start := data(t, m.Events[0])
-	if start["homeTeam"] != homeTeam || start["awayTeam"] != awayTeam {
-		t.Fatalf("%s: MATCH_STARTED con data %v", m.ID, start)
-	}
+// c4Summary resume una partida de connect4 ya revisada por checkConnect4.
+type c4Summary struct {
+	winner   string         // "" si fue empate
+	discs    map[string]int // fichas de cada jugador en el tablero final
+	maxOpen  map[string]int // máximo de amenazas abiertas a la vez de cada jugador
+	created  map[string]int // amenazas que armó cada jugador
+	blocked  map[string]int // amenazas que tapó cada jugador
+	undos    int
+	timeouts int
+	hints    int
+}
 
-	teamOf := map[string]string{}
-	teamSize := map[string]int{}
-	sentOff := map[string]bool{}
-	lastOnTargetShot := map[string]time.Time{} // jugador -> hora de su último tiro al arco
+// c4State es el tablero mientras checkConnect4 recorre los eventos.
+type c4State struct {
+	discs   map[c4Cell]string
+	threats map[c4Cell]map[string]bool
+	turn    string
+	last    c4Cell
+}
+
+func (s c4State) clone() c4State {
+	c := c4State{discs: map[c4Cell]string{}, threats: map[c4Cell]map[string]bool{}, turn: s.turn, last: s.last}
+	for k, v := range s.discs {
+		c.discs[k] = v
+	}
+	for k, owners := range s.threats {
+		c.threats[k] = map[string]bool{}
+		for p := range owners {
+			c.threats[k][p] = true
+		}
+	}
+	return c
+}
+
+// connects dice si una ficha de p en cell queda en una línea de 4 o más.
+// Es independiente de c4Game, para que el test no dependa del código que
+// revisa.
+func connects(discs map[c4Cell]string, cell c4Cell, p string) bool {
+	for _, d := range [][2]int{{1, 0}, {0, 1}, {1, 1}, {1, -1}} {
+		count := 1
+		for _, sign := range []int{1, -1} {
+			for c := (c4Cell{cell.col + sign*d[0], cell.row + sign*d[1]}); discs[c] == p; c = (c4Cell{c.col + sign*d[0], c.row + sign*d[1]}) {
+				count++
+			}
+		}
+		if count >= 4 {
+			return true
+		}
+	}
+	return false
+}
+
+// checkConnect4 reconstruye el tablero evento por evento y revisa las reglas
+// de contexto de connect4 (las mismas que aplica Scala): dos jugadores y
+// turnos (empieza el primero que entró), gravedad, THREAT_CREATED en una
+// casilla vacía que de verdad completaría 4 y sin repetir, THREAT_BLOCKED de
+// una amenaza abierta con una ficha propia, UNDO solo del humano contra la
+// IA y de la última ficha, y CONNECT_FOUR real, de quien soltó la última
+// ficha y como última acción. Si nadie ganó, el tablero tiene que estar lleno.
+func checkConnect4(t *testing.T, m Match) c4Summary {
+	t.Helper()
+	sum := c4Summary{discs: map[string]int{}, maxOpen: map[string]int{}, created: map[string]int{}, blocked: map[string]int{}}
+	var players []string
+	bots := map[string]bool{}
+	st := c4State{discs: map[c4Cell]string{}, threats: map[c4Cell]map[string]bool{}}
+	var history []c4State
 
 	for _, e := range m.Events {
-		if sentOff[e.PlayerID] {
-			t.Fatalf("%s: %s generó %s después de su roja", m.ID, e.PlayerID, e.EventID)
-		}
+		p := e.PlayerID
 		if e.Type == "PLAYER_JOINED" {
-			team := data(t, e)["teamId"].(string)
-			teamOf[e.PlayerID] = team
-			teamSize[team]++
+			players = append(players, p)
+			if data(t, e)["bot"] == true {
+				bots[p] = true
+			}
+			if st.turn == "" {
+				st.turn = p
+			}
 			continue
 		}
 		if e.Type != "PLAYER_ACTION" {
 			continue
 		}
-		if teamOf[e.PlayerID] == "" {
-			t.Fatalf("%s: %s juega sin haber entrado a un equipo", m.ID, e.PlayerID)
+		if sum.winner != "" {
+			t.Fatalf("%s: %s después del 4 en línea", m.ID, e.EventID)
 		}
-
+		rival := players[0]
+		if p == players[0] {
+			rival = players[1]
+		}
 		d := data(t, e)
-		if d["teamId"] != teamOf[e.PlayerID] {
-			t.Fatalf("%s: %s tiene teamId %v pero juega en %s", m.ID, e.EventID, d["teamId"], teamOf[e.PlayerID])
+		var cell c4Cell
+		if c, ok := d["column"]; ok && d["row"] != nil {
+			cell = c4Cell{int(c.(float64)), int(d["row"].(float64))}
 		}
-		ts, _ := time.Parse(time.RFC3339, e.Timestamp)
+		myTurn := func() {
+			if st.turn != p {
+				t.Fatalf("%s: %s %s fuera de turno", m.ID, e.EventID, e.Action)
+			}
+		}
 
 		switch e.Action {
-		case "SHOT", "POWER_SHOT":
-			if d["onTarget"] == true {
-				lastOnTargetShot[e.PlayerID] = ts
+		case "DISC_DROPPED":
+			myTurn()
+			free := 1
+			for st.discs[c4Cell{cell.col, free}] != "" {
+				free++
 			}
-		case "GOAL":
-			shotAt, ok := lastOnTargetShot[e.PlayerID]
-			if !ok || ts.Sub(shotAt) < time.Second {
-				t.Fatalf("%s: GOAL %s sin tiro al arco previo (≥1 s) del mismo jugador", m.ID, e.EventID)
+			if cell.row != free || free > 6 {
+				t.Fatalf("%s: %s cae en la fila %d, pero la libre es la %d", m.ID, e.EventID, cell.row, free)
 			}
-			delete(lastOnTargetShot, e.PlayerID) // un tiro, un gol
-			if a, ok := d["assistId"]; ok && teamOf[a.(string)] != teamOf[e.PlayerID] {
-				t.Fatalf("%s: asistencia de un rival en %s", m.ID, e.EventID)
+			history = append(history, st.clone())
+			st.discs[cell] = p
+			st.last = cell
+			st.turn = rival
+		case "TURN_TIMEOUT":
+			myTurn()
+			sum.timeouts++
+			st.turn = rival
+		case "HINT_USED":
+			myTurn()
+			sum.hints++
+		case "THREAT_CREATED":
+			if st.discs[cell] != "" || st.threats[cell][p] || !connects(st.discs, cell, p) {
+				t.Fatalf("%s: %s no es una amenaza nueva de verdad", m.ID, e.EventID)
 			}
-		case "PASS":
-			if teamOf[d["targetId"].(string)] != teamOf[e.PlayerID] {
-				t.Fatalf("%s: pase a un rival en %s", m.ID, e.EventID)
+			if st.threats[cell] == nil {
+				st.threats[cell] = map[string]bool{}
 			}
-		case "TACKLE":
-			if teamOf[d["targetId"].(string)] == teamOf[e.PlayerID] {
-				t.Fatalf("%s: barrida a un compañero en %s", m.ID, e.EventID)
+			st.threats[cell][p] = true
+			sum.created[p]++
+		case "THREAT_BLOCKED":
+			attacker := d["attackerId"].(string)
+			if !st.threats[cell][attacker] || st.discs[cell] != p {
+				t.Fatalf("%s: %s tapa una amenaza que no existe", m.ID, e.EventID)
 			}
-		case "FOUL":
-			if d["card"] == "red" {
-				sentOff[e.PlayerID] = true
+			delete(st.threats[cell], attacker)
+			sum.blocked[p]++
+		case "UNDO":
+			if bots[p] || !bots[rival] || st.last != cell || len(history) == 0 {
+				t.Fatalf("%s: %s es un UNDO inválido", m.ID, e.EventID)
 			}
+			st = history[len(history)-1]
+			history = history[:len(history)-1]
+			sum.undos++
+		case "CONNECT_FOUR":
+			if st.discs[st.last] != p || !connects(st.discs, st.last, p) {
+				t.Fatalf("%s: %s no es un 4 en línea de %s", m.ID, e.EventID, p)
+			}
+			sum.winner = p
+		}
+
+		for _, who := range players {
+			open := 0
+			for _, owners := range st.threats {
+				if owners[who] {
+					open++
+				}
+			}
+			sum.maxOpen[who] = max(sum.maxOpen[who], open)
 		}
 	}
-	if teamSize[homeTeam] != 6 || teamSize[awayTeam] != 6 {
-		t.Fatalf("%s: equipos de %d y %d jugadores, se esperaban 6 y 6", m.ID, teamSize[homeTeam], teamSize[awayTeam])
+
+	if len(players) != 2 {
+		t.Fatalf("%s: %d jugadores", m.ID, len(players))
 	}
+	if sum.winner == "" && len(st.discs) != c4Cols*c4Rows {
+		t.Fatalf("%s: termina sin ganador con %d fichas", m.ID, len(st.discs))
+	}
+	for _, p := range st.discs {
+		sum.discs[p]++
+	}
+	return sum
 }
 
-// Entre muchos partidos al azar aparecen todas las acciones de football del
+// Entre muchas partidas al azar aparecen todas las acciones de connect4 del
 // catálogo.
-func TestFootballUsesAllActions(t *testing.T) {
+func TestConnect4UsesAllActions(t *testing.T) {
 	used := map[string]bool{}
 	for seed := int64(1); seed <= 50; seed++ {
-		for _, m := range Generate(seed, Counts{Football: 3}) {
+		for _, m := range Generate(seed, Counts{Connect4: 3}) {
 			if m.Script != "" {
 				continue
 			}
@@ -295,9 +396,9 @@ func TestFootballUsesAllActions(t *testing.T) {
 			}
 		}
 	}
-	for action := range validation.GameActions["football"] {
+	for action := range validation.GameActions["connect4"] {
 		if !used[action] {
-			t.Errorf("ningún partido al azar usó %s", action)
+			t.Errorf("ninguna partida al azar usó %s", action)
 		}
 	}
 }
@@ -468,7 +569,7 @@ func TestSend(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	matches := Generate(42, Counts{Racing: 2, Football: 2, Fighting: 2, Tetris: 2})
+	matches := Generate(42, Counts{Racing: 2, Connect4: 2, Fighting: 2, Tetris: 2})
 	results := Send(srv.URL, matches)
 
 	for i, m := range matches {

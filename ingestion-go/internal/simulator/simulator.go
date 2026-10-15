@@ -36,7 +36,7 @@ type Match struct {
 
 // Counts dice cuántas partidas aleatorias generar de cada juego.
 type Counts struct {
-	Racing, Football, Fighting, Tetris int
+	Racing, Fighting, Connect4, Tetris int
 }
 
 // Generate crea los escenarios guionizados (siempre) y las partidas
@@ -49,10 +49,10 @@ func Generate(seed int64, n Counts) []Match {
 		start := baseTime.Add(time.Duration(i) * 15 * time.Minute)
 		matches = append(matches, generateRacing(r, id, start))
 	}
-	for i := 1; i <= n.Football; i++ {
-		id := fmt.Sprintf("foot-s%d-%03d", seed, i)
+	for i := 1; i <= n.Connect4; i++ {
+		id := fmt.Sprintf("c4-s%d-%03d", seed, i)
 		start := baseTime.Add(time.Duration(i) * 2 * time.Hour)
-		matches = append(matches, generateFootball(r, id, start))
+		matches = append(matches, generateConnect4(r, id, start))
 	}
 	for i := 1; i <= n.Fighting; i++ {
 		id := fmt.Sprintf("fight-s%d-%03d", seed, i)
@@ -132,6 +132,11 @@ func playerIDs(n int) []string {
 // pick elige un elemento al azar.
 func pick(r *rand.Rand, list []string) string {
 	return list[r.Intn(len(list))]
+}
+
+// randSeconds devuelve una duración al azar entre minSec y maxSec segundos.
+func randSeconds(r *rand.Rand, minSec, maxSec int) time.Duration {
+	return time.Duration(minSec+r.Intn(maxSec-minSec+1)) * time.Second
 }
 
 // ---------------------------------------------------------------------------

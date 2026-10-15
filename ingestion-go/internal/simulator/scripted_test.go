@@ -2,7 +2,6 @@ package simulator
 
 import (
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -33,7 +32,7 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1, Tetris: 1})); got != 14+2+3+1+1 {
+	if got := len(Generate(42, Counts{Racing: 2, Connect4: 3, Fighting: 1, Tetris: 1})); got != 14+2+3+1+1 {
 		t.Fatalf("partidas = %d, se esperaban 21", got)
 	}
 }
@@ -165,124 +164,40 @@ func TestScriptedRacing(t *testing.T) {
 	}
 }
 
-// footballSummary resume un partido: el marcador después de cada gol, goles
-// por jugador, tiros por jugador, atajadas, autogoles, rojas, goles sin
-// asistencia y goles de tiro potente.
-type footballSummary struct {
-	scoreTimeline []string // ej. ["0-1", "1-1", "2-1"] (A-B)
-	goals         map[string]int
-	shots         map[string]int
-	saves         map[string]int
-	ownGoals      int
-	reds          []string
-	unassisted    int
-	powerGoals    int
-}
+func TestScriptedConnect4(t *testing.T) {
+	c4 := scriptedFor(t, "connect4")
 
-func summarize(t *testing.T, m Match) footballSummary {
-	t.Helper()
-	s := footballSummary{goals: map[string]int{}, shots: map[string]int{}, saves: map[string]int{}}
-	score := map[string]int{}
-	lastShot := map[string]string{} // jugador -> acción de su último tiro
-	addGoal := func(team string) {
-		score[team]++
-		s.scoreTimeline = append(s.scoreTimeline, strconv.Itoa(score["A"])+"-"+strconv.Itoa(score["B"]))
-	}
-	for _, e := range m.Events {
-		if e.Type != "PLAYER_ACTION" {
-			continue
-		}
-		d := data(t, e)
-		switch e.Action {
-		case "SHOT", "POWER_SHOT":
-			s.shots[e.PlayerID]++
-			lastShot[e.PlayerID] = e.Action
-		case "GOAL":
-			addGoal(d["teamId"].(string))
-			s.goals[e.PlayerID]++
-			if _, ok := d["assistId"]; !ok {
-				s.unassisted++
-			}
-			if lastShot[e.PlayerID] == "POWER_SHOT" {
-				s.powerGoals++
-			}
-		case "OWN_GOAL": // suma para el otro equipo
-			s.ownGoals++
-			if d["teamId"] == "A" {
-				addGoal("B")
-			} else {
-				addGoal("A")
-			}
-		case "SAVE":
-			s.saves[e.PlayerID]++
-		case "FOUL":
-			if d["card"] == "red" {
-				s.reds = append(s.reds, e.PlayerID)
-			}
-		}
-	}
-	return s
-}
-
-func TestScriptedFootball(t *testing.T) {
-	football := scriptedFor(t, "football")
-
-	cb := summarize(t, football["comeback"])
-	if !reflect.DeepEqual(cb.scoreTimeline, []string{"0-1", "1-1", "2-1"}) {
-		t.Errorf("comeback: marcador %v, se esperaba B adelante y A ganando 2-1", cb.scoreTimeline)
-	}
-	if !reflect.DeepEqual(cb.reds, []string{"p12"}) {
-		t.Errorf("comeback: rojas %v, se esperaba [p12]", cb.reds)
-	}
-	if cb.unassisted != 1 {
-		t.Errorf("comeback: goles sin asistencia = %d, se esperaba 1", cb.unassisted)
+	// Quick win: p1 gana con 4 fichas.
+	if q := checkConnect4(t, c4["quick"]); q.winner != "p1" || q.discs["p1"] > 7 {
+		t.Errorf("quick: ganador %q con %d fichas", q.winner, q.discs["p1"])
 	}
 
-	draw := summarize(t, football["draw"])
-	if final := draw.scoreTimeline[len(draw.scoreTimeline)-1]; final != "1-1" {
-		t.Errorf("draw: marcador final %s, se esperaba 1-1", final)
-	}
-	for _, p := range []string{"p4", "p10"} {
-		if draw.shots[p] != 0 {
-			t.Errorf("draw: %s tiene %d tiros, se esperaban 0", p, draw.shots[p])
-		}
+	// Double threat: p1 tiene 2 amenazas abiertas a la vez y gana; antes
+	// deshace dos fichas y pide una pista.
+	if d := checkConnect4(t, c4["double"]); d.winner != "p1" || d.maxOpen["p1"] < 2 || d.undos != 2 || d.hints != 1 {
+		t.Errorf("double: %+v", d)
 	}
 
-	ht := summarize(t, football["hattrick"])
-	if ht.goals["p4"] != 3 {
-		t.Errorf("hattrick: p4 tiene %d goles, se esperaban 3", ht.goals["p4"])
-	}
-	if final := ht.scoreTimeline[len(ht.scoreTimeline)-1]; final != "3-1" {
-		t.Errorf("hattrick: marcador final %s, se esperaba 3-1", final)
+	// Perfect defense: p1 arma 2 o más amenazas y p2 las tapa todas.
+	if d := checkConnect4(t, c4["defense"]); d.created["p1"] < 2 || d.blocked["p2"] < d.created["p1"] || d.timeouts != 1 {
+		t.Errorf("defense: %+v", d)
 	}
 
-	// Valla invicta: A gana 3-0 con un autogol, un gol de tiro potente y 2
-	// atajadas de su portero; además usa las 11 acciones.
-	cs := summarize(t, football["cleansheet"])
-	if final := cs.scoreTimeline[len(cs.scoreTimeline)-1]; final != "3-0" {
-		t.Errorf("cleansheet: marcador final %s, se esperaba 3-0", final)
+	// Empate: tablero lleno sin ganador.
+	if d := checkConnect4(t, c4["draw"]); d.winner != "" || d.discs["p1"]+d.discs["p2"] != 42 {
+		t.Errorf("draw: %+v", d)
 	}
-	if cs.ownGoals != 1 || cs.powerGoals != 1 || cs.saves["p1"] != 2 {
-		t.Errorf("cleansheet: autogoles=%d goles potentes=%d atajadas de p1=%d", cs.ownGoals, cs.powerGoals, cs.saves["p1"])
-	}
+
+	// Entre los escenarios se usan las 7 acciones.
 	used := map[string]bool{}
-	for _, e := range football["cleansheet"].Events {
-		used[e.Action] = true
-	}
-	for action := range validation.GameActions["football"] {
-		if !used[action] {
-			t.Errorf("cleansheet: no usa %s", action)
-		}
-	}
-
-	// Todos los partidos tienen el entretiempo como pausa.
-	for name, m := range football {
-		paused := false
+	for _, m := range c4 {
 		for _, e := range m.Events {
-			paused = paused || (e.Type == "MATCH_PAUSED" && string(e.Data) == `{"reason":"half_time"}`)
+			used[e.Action] = true
 		}
-		if !paused {
-			t.Errorf("%s: sin entretiempo", name)
+	}
+	for action := range validation.GameActions["connect4"] {
+		if !used[action] {
+			t.Errorf("ningún escenario de connect4 usa %s", action)
 		}
 	}
 }

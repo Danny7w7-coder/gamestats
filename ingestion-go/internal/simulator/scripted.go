@@ -21,10 +21,10 @@ func scriptedMatches(seed int64) []Match {
 		raceClean(id("race", "clean"), scriptBase.Add(20*time.Minute)),
 		raceWireToWire(id("race", "wire"), scriptBase.Add(30*time.Minute)),
 		racePauseDNF(id("race", "dnf"), scriptBase.Add(40*time.Minute)),
-		footballComeback(id("foot", "comeback"), scriptBase.Add(1*time.Hour)),
-		footballDraw(id("foot", "draw"), scriptBase.Add(3*time.Hour)),
-		footballHatTrick(id("foot", "hattrick"), scriptBase.Add(5*time.Hour)),
-		footballCleanSheet(id("foot", "cleansheet"), scriptBase.Add(7*time.Hour)),
+		connect4Quick(id("c4", "quick"), scriptBase.Add(1*time.Hour)),
+		connect4Double(id("c4", "double"), scriptBase.Add(1*time.Hour+15*time.Minute)),
+		connect4Defense(id("c4", "defense"), scriptBase.Add(1*time.Hour+30*time.Minute)),
+		connect4Draw(id("c4", "draw"), scriptBase.Add(1*time.Hour+45*time.Minute)),
 		fightFlawless(id("fight", "flawless"), scriptBase.Add(9*time.Hour)),
 		fightComeback(id("fight", "comeback"), scriptBase.Add(9*time.Hour+10*time.Minute)),
 		fightCombo(id("fight", "combo"), scriptBase.Add(9*time.Hour+20*time.Minute)),
@@ -123,10 +123,11 @@ func racePauseDNF(id string, start time.Time) Match {
 }
 
 // ---------------------------------------------------------------------------
-// Football
+// Connect4
 //
-// Todos los partidos son 6 vs 6 con entretiempo (newFootballGame).
-// Equipo A: p1 (portero), p2 a p6. Equipo B: p7 (portero), p8 a p12.
+// c4Game lleva el tablero: las amenazas, los bloqueos y el 4 en línea salen
+// solos de las columnas que se juegan. Cada escenario solo dice en qué
+// columna suelta su ficha cada jugador, por turnos.
 
 // scripted le pone la descripción al partido terminado.
 func scripted(m Match, script string) Match {
@@ -134,89 +135,57 @@ func scripted(m Match, script string) Match {
 	return m
 }
 
-// footballComeback: B gana 1-0 y A remonta 2-1. Además:
-//   - tarjeta roja a p12 (minuto 30); después no vuelve a aparecer;
-//   - gol de p3 sin asistencia (minuto 55).
-func footballComeback(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(10, 0, "p8", "p9", true, 18.0)
-	g.goal(10, 15, "p9", "p8", false) // 0-1
-	g.pass(22, 0, "p2", "p3", false, 25.5)
-	g.interception(22, 3, "p10")
-	g.foul(30, 0, "p12", "p3", "red") // p12 expulsado
-	g.pass(41, 0, "p4", "p3", true, 12.0)
-	g.save(41, 20, "p3", false)    // ataja p7
-	g.goal(55, 0, "p3", "", false) // 1-1, sin asistencia
-	g.pass(70, 0, "p4", "p2", true, 20.0)
-	g.shot(70, 10, "p2", false, false)
-	g.corner(77, 0, "p5")
-	g.goal(78, 10, "p2", "p4", false) // 2-1
-	g.shot(85, 0, "p9", false, false)
-	return scripted(g.finish(92), "remontada: B gana 1-0 y A gana 2-1; roja a p12; gol de p3 sin asistencia")
+// c4Play suelta fichas en las columnas dadas, una por turno.
+func c4Play(g *c4Game, cols ...int) {
+	for _, col := range cols {
+		g.wait(3 * time.Second)
+		g.drop(col)
+	}
 }
 
-// footballDraw: empate 1-1. p4 y p10 juegan (pases, faltas, barridas) pero
-// no tiran al arco.
-func footballDraw(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(5, 0, "p4", "p3", true, 14.0)
-	g.pass(12, 0, "p3", "p2", true, 22.0)
-	g.goal(12, 10, "p2", "p3", false) // 1-0
-	g.foul(20, 0, "p4", "p8", "yellow")
-	g.dribble(28, 0, "p11", true)
-	g.pass(33, 0, "p10", "p8", true, 10.5)
-	g.shot(33, 15, "p8", false, false)
-	g.pass(50, 0, "p10", "p9", true, 19.0)
-	g.goal(50, 10, "p9", "p10", false) // 1-1
-	g.tackle(60, 0, "p4", "p9", true)
-	g.pass(66, 0, "p4", "p2", false, 30.0)
-	g.save(80, 0, "p2", false) // ataja p7
-	g.foul(88, 0, "p10", "p2", "none")
-	return scripted(g.finish(92), "empate 1-1; p4 y p10 no tiran al arco")
+// connect4Quick: p1 apila 4 fichas en la columna 4 y gana con solo 4 fichas
+// (quick win). En el medio arma una amenaza en (4,4) que p2 no tapa.
+func connect4Quick(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 4, 1, 4, 1, 4, 2, 4)
+	return scripted(g.finish(), "quick win: p1 gana con 4 fichas (vertical en la columna 4)")
 }
 
-// footballHatTrick: p4 mete 3 goles (uno de tiro potente) y A gana 3-1.
-func footballHatTrick(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(15, 0, "p2", "p4", true, 17.0)
-	g.goal(15, 10, "p4", "p2", false) // 1-0
-	g.shot(30, 0, "p4", false, false)
-	g.goal(44, 0, "p4", "", true) // 2-0, tiro potente
-	g.pass(60, 0, "p9", "p8", true, 21.0)
-	g.goal(60, 10, "p8", "p9", false) // 2-1
-	g.pass(80, 0, "p3", "p4", true, 15.0)
-	g.goal(80, 10, "p4", "p3", false) // 3-1, hat-trick
-	g.foul(86, 0, "p9", "p4", "yellow")
-	return scripted(g.finish(92), "hat-trick de p4; A gana 3-1")
+// connect4Double: p1 contra la IA (cpu), como el fixture connect4_vs_bot. p1
+// juega mal en la columna 1, la IA lo tapa y p1 deshace las dos fichas
+// (UNDO). Pide una pista y con la ficha en la columna 5 queda con 3 en
+// línea abierta por los dos lados: dos amenazas a la vez (double threat).
+// La IA solo puede tapar una y p1 gana por la otra.
+func connect4Double(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "cpu"}, map[string]string{"cpu": "medium"})
+	c4Play(g, 4, 4, 3, 3, 1, 2)
+	g.undo() // la ficha de la IA en (2,1)
+	g.undo() // la propia en (1,1)
+	g.hint()
+	c4Play(g, 5, 6, 2)
+	return scripted(g.finish(), "double threat: p1 deshace una mala jugada, arma dos amenazas a la vez y gana")
 }
 
-// footballCleanSheet: A gana 3-0 sin recibir goles (valla invicta). Los goles
-// son un autogol de p10 (B), un tiro potente de p5 y un gol de p3 con
-// asistencia de p2. p1 (portero de A) ataja 2 tiros y p12 (B) ve la roja.
-// Usa las 11 acciones de football.
-func footballCleanSheet(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(3, 0, "p2", "p3", true, 18.5)
-	g.dribble(3, 20, "p3", true)
-	g.save(4, 0, "p3", false) // ataja p7
-	g.corner(6, 0, "p5")
-	g.pass(8, 0, "p8", "p9", false, 25.5)
-	g.interception(8, 5, "p6")
-	g.save(10, 0, "p9", false) // ataja p1
-	g.ownGoal(12, 0, "p10")    // 1-0 (autogol de B)
-	g.foul(20, 0, "p11", "p2", "yellow")
-	g.tackle(25, 0, "p12", "p3", true)
-	g.goal(30, 0, "p5", "", true) // 2-0, tiro potente
-	g.dribble(55, 0, "p8", false)
-	g.tackle(55, 2, "p6", "p8", true)
-	g.foul(62, 0, "p12", "p6", "red") // p12 expulsado
-	g.shot(70, 0, "p9", true, false)
-	g.corner(75, 0, "p8")
-	g.save(75, 20, "p11", false) // ataja p1
-	g.pass(80, 0, "p2", "p3", true, 20.5)
-	g.goal(80, 15, "p3", "p2", false) // 3-0
-	g.shot(88, 0, "p9", false, false)
-	return scripted(g.finish(91), "valla invicta: A gana 3-0 con autogol de p10, tiro potente de p5 y 2 atajadas de p1")
+// connect4Defense: p1 arma dos amenazas, una horizontal en (1,1) y una
+// vertical en (3,4), y p2 tapa las dos (perfect defense). Después p1 pierde
+// un turno por tiempo, p2 arma una diagonal con amenaza en (4,3), p1 no la
+// ve y p2 gana.
+func connect4Defense(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 4, 4, 3, 5, 2, 1, 3, 6, 3, 3)
+	g.wait(30 * time.Second)
+	g.timeout() // a p1 se le acaba el tiempo
+	c4Play(g, 5, 7, 4)
+	return scripted(g.finish(), "perfect defense: p2 tapa las dos amenazas de p1 y gana")
+}
+
+// connect4Draw: dos humanos llenan el tablero (42 fichas) sin que nadie haga
+// 4 en línea: empate.
+func connect4Draw(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 2, 4, 2, 2, 2, 2, 2, 4, 6, 3, 4, 1, 5, 4, 3, 6, 6, 3, 7, 1, 7,
+		5, 1, 1, 1, 5, 3, 7, 4, 1, 6, 5, 3, 3, 5, 5, 7, 6, 6, 7, 7, 4)
+	return scripted(g.finish(), "empate: el tablero se llena sin 4 en línea")
 }
 
 // ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
 }
 
 func TestEvents(t *testing.T) {
-	gameGoalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1)
+	gameGoalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1)
 	badTimestampType := strings.Replace(validEv, `"2026-10-05T14:01:22Z"`, `5`, 1)
 
 	tests := []struct {
@@ -111,11 +111,11 @@ func TestEvents(t *testing.T) {
 
 func TestEventsRejectedReason(t *testing.T) {
 	h, _ := newTestHandler(t)
-	rec := postEvents(h, strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1))
+	rec := postEvents(h, strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1))
 
 	var resp eventsResponse
 	json.Unmarshal(rec.Body.Bytes(), &resp)
-	want := rejection{EventID: "e1", Reason: `la acción "GOAL" no existe en el juego "racing" (es una acción de "football")`}
+	want := rejection{EventID: "e1", Reason: `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")`}
 	if len(resp.Rejected) != 1 || resp.Rejected[0] != want {
 		t.Fatalf("rejected = %+v, se esperaba %+v", resp.Rejected, want)
 	}
@@ -124,7 +124,7 @@ func TestEventsRejectedReason(t *testing.T) {
 // Solo los eventos aceptados deben llegar al store.
 func TestMatchesAfterEvents(t *testing.T) {
 	h, _ := newTestHandler(t)
-	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1)
+	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1)
 	postEvents(h, "["+validEv+","+goalInRacing+"]")
 
 	req := httptest.NewRequest(http.MethodGet, "/matches", nil)

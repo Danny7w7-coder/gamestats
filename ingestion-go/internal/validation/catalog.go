@@ -13,11 +13,10 @@ var GameActions = map[string]map[string]bool{
 		"LAP_COMPLETED": true, "POSITION_CHANGED": true, "OVERTAKE": true, "LAPPED": true,
 		"COLLISION": true, "RESPAWN": true, "PENALTY": true, "DNF": true,
 	},
-	// Fútbol arcade retro 6 vs 6 (11 acciones).
-	"football": {
-		"PASS": true, "SHOT": true, "POWER_SHOT": true, "GOAL": true, "OWN_GOAL": true,
-		"SAVE": true, "TACKLE": true, "INTERCEPTION": true, "DRIBBLE": true,
-		"FOUL": true, "CORNER": true,
+	// 4 en línea (Connect Four), contra persona o contra la IA (7 acciones).
+	"connect4": {
+		"DISC_DROPPED": true, "THREAT_CREATED": true, "THREAT_BLOCKED": true,
+		"CONNECT_FOUR": true, "TURN_TIMEOUT": true, "UNDO": true, "HINT_USED": true,
 	},
 	// Pelea 1 vs 1 básica, por rounds (6 acciones).
 	"fighting": {

@@ -48,7 +48,7 @@ func TestValidate(t *testing.T) {
 		{"r2 inválido: sin zona horaria", func(e *model.Event) { e.Timestamp = "2026-10-05T14:01:22" }, "RFC 3339"},
 
 		// Regla 3: gameId en el catálogo.
-		{"r3 válido: football", func(e *model.Event) { e.GameID = "football"; e.Action = "PASS" }, ""},
+		{"r3 válido: connect4", func(e *model.Event) { e.GameID = "connect4"; e.Action = "DISC_DROPPED" }, ""},
 		{"r3 válido: fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "COMBO" }, ""},
 		{"r3 válido: tetris", func(e *model.Event) { e.GameID = "tetris"; e.Action = "T_SPIN" }, ""},
 		{"r3 inválido: juego desconocido", func(e *model.Event) { e.GameID = "chess" }, "gameId desconocido"},
@@ -68,13 +68,13 @@ func TestValidate(t *testing.T) {
 		{"r5 inválido: PLAYER_LEFT sin playerId", func(e *model.Event) { e.Type = "PLAYER_LEFT"; e.Action = ""; e.PlayerID = "" }, "falta el campo playerId"},
 
 		// Regla 6: action del catálogo de ESE juego.
-		{"r6 válido: GOAL en football", func(e *model.Event) { e.GameID = "football"; e.Action = "GOAL" }, ""},
+		{"r6 válido: CONNECT_FOUR en connect4", func(e *model.Event) { e.GameID = "connect4"; e.Action = "CONNECT_FOUR" }, ""},
 		{"r6 inválido: sin action", func(e *model.Event) { e.Action = "" }, "falta el campo action"},
-		{"r6 inválido: GOAL en racing (es de football)", func(e *model.Event) { e.Action = "GOAL" }, `la acción "GOAL" no existe en el juego "racing" (es una acción de "football")`},
-		{"r6 válido: OWN_GOAL en football", func(e *model.Event) { e.GameID = "football"; e.Action = "OWN_GOAL" }, ""},
+		{"r6 inválido: CONNECT_FOUR en racing (es de connect4)", func(e *model.Event) { e.Action = "CONNECT_FOUR" }, `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")`},
+		{"r6 válido: UNDO en connect4", func(e *model.Event) { e.GameID = "connect4"; e.Action = "UNDO" }, ""},
 		{"r6 válido: FATALITY en fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "FATALITY" }, ""},
 		{"r6 válido: TOP_OUT en tetris", func(e *model.Event) { e.GameID = "tetris"; e.Action = "TOP_OUT" }, ""},
-		{"r6 inválido: GOAL en fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "GOAL" }, `la acción "GOAL" no existe en el juego "fighting"`},
+		{"r6 inválido: DISC_DROPPED en fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "DISC_DROPPED" }, `la acción "DISC_DROPPED" no existe en el juego "fighting"`},
 		{"r6 inválido: LAP_COMPLETED en tetris", func(e *model.Event) { e.GameID = "tetris" }, `la acción "LAP_COMPLETED" no existe en el juego "tetris"`},
 		{"r6 válido: acción que no existe en ningún juego (desconocida)", func(e *model.Event) { e.Action = "JUMP" }, ""},
 
@@ -134,6 +134,10 @@ func TestValidateContractFixtures(t *testing.T) {
 		{"racing_invalid_events.json", nil},
 		{"fighting_invalid_events.json", nil},
 		{"tetris_invalid_events.json", nil},
+		{"connect4_match_ok.json", nil},
+		{"connect4_vs_bot.json", nil},
+		{"connect4_draw.json", nil},
+		{"connect4_invalid_events.json", nil},
 		{"invalid_bad_timestamp.json", []string{"y-e02"}},
 	}
 
