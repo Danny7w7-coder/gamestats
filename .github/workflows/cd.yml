@@ -33,7 +33,7 @@ jobs:
         run: |
           # Go envía los lotes a Scala en segundo plano: se espera hasta 60 s
           # a que lleguen todas las partidas que generó el simulador.
-          expected=29 # 4 al azar de cada uno de los 4 juegos + 13 escenarios fijos
+          expected=30 # 4 al azar de cada uno de los 4 juegos + 14 escenarios fijos
           for i in $(seq 1 30); do
             count=$(curl -fs http://localhost:8081/results | jq length)
             echo "partidas en /results: $count"
