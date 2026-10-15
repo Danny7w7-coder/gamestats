@@ -63,7 +63,7 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 
 ## Quién valida qué
 
-- **Go** valida cada evento al recibirlo y rechaza solo ese evento: campos obligatorios, `timestamp` RFC3339, `type` conocido, `action` solo en `PLAYER_ACTION`, y `action` dentro del catálogo del juego (`ingestion-go/internal/validation/catalog.go`). Go **no** revisa `data`. Por eso, aunque `event.schema.json` acepta cualquier `action`, en la práctica a Scala solo llegan acciones del catálogo.
+- **Go** valida cada evento al recibirlo y rechaza solo ese evento: campos obligatorios, `timestamp` RFC3339, `gameId` y `type` conocidos, `action` solo en `PLAYER_ACTION`, y que la `action` no sea de **otro** juego (catálogo en `ingestion-go/internal/validation/catalog.go`). Una `action` que no existe en ningún juego **se acepta**: Go la anota como aviso en `logs/unknown/unknown_actions.jsonl` y en el campo `warnings` de la respuesta, y llega a Scala como `UnknownAction`. Así se puede agregar un evento nuevo sin tocar el sistema. Go **no** revisa `data`.
 - **Scala** rechaza el lote completo (`400`) solo por errores del lote: encabezado incompleto, `events` vacío, un evento sin `eventId`/`timestamp`/`type` válidos o de otra partida/juego, o `gameId` sin analyzer. Si una acción conocida trae `data` mal formada o rompe una validación de contexto, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual. Una acción desconocida se cuenta en `eventsByAction` y no afecta el resto.
 - Ante un `4xx` Go no reintenta (la partida queda como `error_envio`); ante `5xx` o timeout reintenta 3 veces (1, 2 y 4 s). Scala solo responde `500` si no puede guardar el resultado.
 

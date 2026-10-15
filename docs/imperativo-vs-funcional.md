@@ -209,7 +209,7 @@ Con **archivos** compartidos, Go no sabría cuándo Scala procesó una partida: 
 
 ## Scala — análisis (funcional)
 
-El módulo de análisis (`analytics-scala/src/main`, unas 850 líneas) recibe el lote completo de una partida y devuelve sus estadísticas y patrones. Se escribió con estas reglas:
+El módulo de análisis (`analytics-scala/src/main`, unas 1800 líneas con comentarios, para los 4 juegos) recibe el lote completo de una partida y devuelve sus estadísticas y patrones. Se escribió con estas reglas:
 
 - **Sin `var`**: todo es `val`, `case class` y colecciones inmutables.
 - **Funciones puras**: el análisis no hace I/O ni guarda estado.
@@ -234,7 +234,7 @@ def eventsByAction(events: List[Event]): Map[String, Int] =
     .toMap
 ```
 
-La versión imperativa necesitaría un mapa mutable, un ciclo, un `if` para saltar los eventos sin acción y otro para inicializar cada contador. Acá cada línea corresponde a un paso de la idea: quedarse con las acciones, agruparlas y contarlas. El mismo patrón (`groupBy` + `mapValues`) se repite para los goles por equipo, las faltas por equipo y las asistencias por jugador, y siempre se lee igual.
+La versión imperativa necesitaría un mapa mutable, un ciclo, un `if` para saltar los eventos sin acción y otro para inicializar cada contador. Acá cada línea corresponde a un paso de la idea: quedarse con las acciones, agruparlas y contarlas. El mismo patrón se repite en otras partes y siempre se lee igual: `groupMapReduce` da el mejor combo de cada jugador (`COMBO_MASTER`) y los rounds ganados por jugador, y `groupMap` agrupa las acciones de cada jugador de tetris para sus reglas.
 
 `collect` resultó especialmente útil con el `sealed trait GameAction`, porque filtra por tipo y extrae el dato en un solo paso:
 
@@ -245,19 +245,32 @@ val lapTimes: List[Event] => List[Long] =
 
 #### 2. `foldLeft` hace explícito el estado de un recorrido
 
-La regla COMEBACK de fútbol tiene que recorrer los goles en orden y recordar dos cosas: el marcador y qué equipos estuvieron perdiendo alguna vez. En lugar de dos variables que se modifican dentro de un ciclo, ese estado es un valor (`Progress`) y cada gol produce uno nuevo (`rules/ComebackRule.scala`):
+Las validaciones de contexto tienen que recorrer los eventos en orden y recordar lo que ya pasó: en 4 en línea, el tablero, de quién es el turno y qué amenazas están abiertas. En lugar de variables que se modifican dentro de un ciclo, ese estado es un valor y cada evento produce uno nuevo (`validation/Validation.scala`):
 
 ```scala
-case class Progress(score: Map[String, Int], everBehind: Set[String])
-
-goals.foldLeft(start) { (acc, team) =>
-  val score  = acc.score.updated(team, acc.score.getOrElse(team, 0) + 1)
-  val behind = score.keySet.filter(t => score.exists((other, g) => other != t && g > score(t)))
-  Progress(score, acc.everBehind ++ behind)
+batch.events.foldLeft(start) { (acc, event) =>
+  val next =
+    for
+      paused <- pause(acc.paused, event)
+      _      <- references(batch.players, event)
+      state  <- game.check(acc.state, event)
+    yield acc.copy(paused = paused, state = state, kept = event :: acc.kept)
+  next.fold(reason => acc.copy(skipped = s"${event.eventId}: $reason" :: acc.skipped), identity)
 }
 ```
 
-La ventaja concreta fue al probarlo. `replayGoals` es una función pura que devuelve el estado final, así que los tests revisan directamente el marcador y `everBehind` para las secuencias B-A-A (remontada), A-A-B (sin remontada) y 1-1 (empate, sin remontada), sin levantar nada ni inspeccionar variables intermedias. Lo mismo pasa con la desviación estándar de las vueltas, que suma los cuadrados con `foldLeft` sin un acumulador mutable.
+Si un evento rompe una regla, se devuelve el mismo `acc`: el evento se descarta y el estado queda exactamente como estaba, sin tener que "deshacer" nada.
+
+El caso más claro es el `UNDO` de 4 en línea. Como cada tablero es inmutable, antes de cada ficha se guarda el tablero anterior en una lista, y deshacer es volver a él (`validation/Connect4Check.scala`):
+
+```scala
+case DiscDropped(c, r) => ... s.copy(board = moved, history = b :: s.history)
+case Undo(c, r)        => ... s.copy(board = prev, history = s.history.tail)
+```
+
+En un estilo imperativo, con un tablero mutable, habría que borrar la ficha, reabrir las amenazas que esa ficha había tapado y devolver el turno, cuidando no olvidar nada. Acá el tablero anterior ya tiene todo eso.
+
+La ventaja también se nota al probarlo. `Connect4Check.timeline` arma con `scanLeft` la lista de todos los estados de la partida, y un test compara directamente el tablero antes de una mala jugada con el tablero después de los dos `UNDO`. Las reglas de patrones (`DOUBLE_THREAT`, `QUICK_WIN`) usan esa misma lista. Lo mismo pasa con la desviación estándar de las vueltas, que suma los cuadrados con `foldLeft` sin un acumulador mutable.
 
 #### 3. La composición arma métricas a partir de piezas chicas
 
@@ -269,15 +282,15 @@ val consistency: List[Event] => Double = lapTimes andThen stdDev
 val bestLapMs: List[Event] => Double   = lapTimes andThen (_.minOption.fold(0.0)(_.toDouble))
 ```
 
-`lapTimes`, `average` y `stdDev` se escriben y se prueban una sola vez. Agregar una métrica nueva sobre las vueltas es una línea más. En fútbol, `passAccuracy` se armó igual (`passes andThen (ps => ratio(...))`).
+`lapTimes`, `average` y `stdDev` se escriben y se prueban una sola vez. Agregar una métrica nueva sobre las vueltas es una línea más. En 4 en línea, `centerControl` se armó igual (`dropColumns andThen (proporción en la columna 4)`). Y la regla `WIRE_TO_WIRE` reutiliza la misma línea de tiempo de posiciones que `COMEBACK`: una pide que el ganador haya estado 3.º o peor, la otra que todas sus posiciones sean 1.
 
 #### 4. `Option` y `Either` obligan a manejar los casos borde
 
 Los casos borde del enunciado quedaron resueltos por los tipos, no por recordar poner un `if`:
 
 - Un jugador sin vueltas: `minOption` devuelve `None` y se convierte en `0.0`.
-- Sin tiros o sin pases: toda división pasa por `ratio(hits, attempts)`, que devuelve `0.0` si `attempts == 0`.
-- Empate: `winner` es `Option[String]`, y en empate es `None`, que en el JSON sale `null`. La regla COMEBACK filtra sobre ese `Option`, así que con empate no hay patrón sin código extra.
+- Sin golpes o sin fichas: la precisión y el control del centro devuelven `0.0` si no hay intentos, nunca dividen entre 0.
+- Empate: `winner` es `Option[String]`, y en empate es `None`, que en el JSON sale `null`. Pasa en una pelea con rounds empatados y en un tablero lleno. La regla COMEBACK filtra sobre ese `Option`, así que con empate no hay patrón sin código extra.
 - Una carrera sin `MATCH_FINISHED`: el `ranking` es un `Option` y no hay ganador.
 
 En el parseo, cada paso devuelve `Either[String, A]` y se encadenan con `for`. El primer error corta la cadena y vuelve con contexto, sin que ninguna función lance excepciones:
@@ -295,11 +308,11 @@ Eso dio mensajes de error útiles durante la integración con Go, como `events[1
 
 #### 5. El compilador revisa que no falte ningún caso
 
-`GameAction` es un `sealed trait`, así que cada `match` sobre él tiene que cubrir las 8 variantes (7 acciones más `UnknownAction`). `GameAction.actionName` y `EventType.requiresPlayer` están escritos sin comodín (`case _`) a propósito: si se agrega una acción o un tipo de evento, el compilador avisa dónde falta tratarlo.
+`GameAction` es un `sealed trait`, así que cada `match` sobre él tiene que cubrir las 35 variantes (34 acciones más `UnknownAction`). `GameAction.actionName` y `EventType.requiresPlayer` están escritos sin comodín (`case _`) a propósito: si se agrega una acción o un tipo de evento, el compilador avisa dónde falta tratarlo. Esto se notó al cambiar football por connect4: al borrar las acciones de football, el compilador marcó cada lugar que todavía las usaba.
 
 #### 6. Lo puro se prueba sin montar nada
 
-De los 76 tests del módulo, 69 prueban funciones puras: reciben un lote y comparan el resultado. No levantan el servidor ni comparten estado entre tests. Solo los 7 de `ResultStoreSuite` tocan el disco, y lo hacen en carpetas temporales.
+De los 117 tests del módulo, 110 prueban funciones puras: reciben un lote y comparan el resultado. No levantan el servidor ni comparten estado entre tests. Solo los 7 de `ResultStoreSuite` tocan el disco, y lo hacen en carpetas temporales.
 
 Como `Analyzer.analyze` es puro, el mismo lote siempre da el mismo resultado. Durante la integración eso permitió reproducir exactamente lo que llegaba desde Go con los mismos escenarios del simulador (semilla 42) y comparar.
 
@@ -339,25 +352,25 @@ Es un `Either` dentro de otro: el de afuera significa "el evento está roto, se 
 
 #### 3. Se recorren las mismas listas varias veces
 
-Cada métrica es una función independiente y vuelve a recorrer los eventos del jugador. En racing, `lapTimes` se calcula de nuevo para el promedio, la consistencia, la mejor vuelta y el tiempo efectivo. En fútbol, `goals` se calcula una vez para la métrica de goles y otra dentro de `shotEffectiveness`. `teams(batch)` lo recalculan `score`, `teamStats` y la regla COMEBACK. Además, cada paso del `foldLeft` del COMEBACK crea un `Map` nuevo con `updated`.
+Cada métrica es una función independiente y vuelve a recorrer los eventos del jugador. En racing, `lapTimes` se calcula de nuevo para el promedio, la consistencia, la mejor vuelta y el tiempo efectivo. En 4 en línea, el tablero se reconstruye evento a evento al validar, y después cada regla de patrón lo vuelve a reconstruir con `timeline`. Además, cada ficha crea un `Map` nuevo con `updated` y la pila de `UNDO` guarda un tablero por ficha.
 
 Un ciclo imperativo con contadores haría todo en una sola pasada. Con partidas de 20 a 80 eventos no se nota, pero es un intercambio consciente: legibilidad y funciones que se prueban por separado a cambio de recorridos extra. Con volúmenes grandes habría que juntar varias métricas en un solo `foldLeft`, y se perdería parte de la claridad.
 
 #### 4. La frontera con JSON es verbosa
 
-`json/Codecs.scala` es el archivo más grande del módulo (unas 270 líneas de 850). Leer y escribir JSON a mano de forma segura, con un `Either` por cada campo, es repetitivo. La librería `ujson` guarda todos los números como `Double`, así que hubo que escribir funciones auxiliares (`int`, `long`) que verifican que el número sea entero y que quepa en el tipo. Además, `ujson.Value` es mutable: el código lo trata como si no lo fuera, pero el lenguaje no lo garantiza.
+`json/Codecs.scala` es el archivo más grande del módulo (unas 380 líneas de 1800). Leer y escribir JSON a mano de forma segura, con un `Either` por cada campo, es repetitivo. La librería `ujson` guarda todos los números como `Double`, así que hubo que escribir funciones auxiliares (`int`, `long`) que verifican que el número sea entero y que quepa en el tipo. Además, `ujson.Value` es mutable: el código lo trata como si no lo fuera, pero el lenguaje no lo garantiza.
 
 #### 5. Detalles del lenguaje que costaron tiempo
 
 - El método que da el nombre de una acción se llamó primero `name` en el `sealed trait`. No compiló, porque `UnknownAction(name, raw)` ya tiene un campo `name`, y hubo que renombrarlo a `actionName`.
-- `enum Card { case None, Yellow, Red }` sigue el enunciado, pero `None` choca con el `None` de `Option`. Dentro del código siempre hay que escribir `Card.None` para que no se confundan.
+- En 4 en línea, `DISC_DROPPED` y `THREAT_BLOCKED` llegan como dos eventos separados. Por eso una amenaza no se cierra al soltar la ficha, sino con el `THREAT_BLOCKED` que viene después, y la validación tiene que aceptar que, entre los dos, la casilla esté ocupada y la amenaza siga abierta.
 
 ### Resumen
 
 | | Ventaja | Limitación |
 |---|---|---|
 | Colecciones (`groupBy`, `collect`, `flatMap`) | Cálculos cortos que se leen como la definición de la estadística | Varias pasadas sobre las mismas listas |
-| `foldLeft` | Estado del recorrido explícito y fácil de probar (`replayGoals`) | Crea estructuras nuevas en cada paso |
+| `foldLeft` / `scanLeft` | Estado del recorrido explícito y fácil de probar; `UNDO` es volver a un valor anterior | Crea estructuras nuevas en cada paso |
 | `Option` / `Either` | Casos borde y errores manejados por el tipo, sin `null` ni excepciones | `Either` reporta solo el primer error; anidado se lee peor |
-| Funciones puras | 69 de 76 tests sin servidor ni estado; resultados reproducibles | El I/O (disco, consola, salida del programa) tuvo que aislarse a mano en `storage/` y `api/` |
-| Tipos cerrados (`sealed`, `enum`) | El compilador avisa si falta un caso | Choques de nombres (`name`, `Card.None`) |
+| Funciones puras | 110 de 117 tests sin servidor ni estado; resultados reproducibles | El I/O (disco, consola, salida del programa) tuvo que aislarse a mano en `storage/` y `api/` |
+| Tipos cerrados (`sealed`, `enum`) | El compilador avisa si falta un caso | Choques de nombres (`name`) |

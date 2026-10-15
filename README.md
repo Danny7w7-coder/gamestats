@@ -42,7 +42,7 @@ flowchart LR
 
 1. Los eventos llegan a `POST /events` del servicio Go. Cada evento se valida por separado: uno inválido se rechaza (y se anota en un log) sin afectar a los demás.
 2. Go agrupa los eventos por `matchId`. Cuando llega `MATCH_FINISHED`, ordena los eventos por `timestamp` y envía la partida completa a Scala. Si Scala no responde o responde `5xx`, reintenta 3 veces (1, 2 y 4 s).
-3. Scala valida el lote en dos pasos: el formato de cada evento y su `data`, y después la coherencia con el resto de la partida (validaciones de contexto). Los eventos inválidos se descartan y quedan en el log. Luego elige el analizador del juego (`racing`, `football`, `fighting` o `tetris`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
+3. Scala valida el lote en dos pasos: el formato de cada evento y su `data`, y después la coherencia con el resto de la partida (validaciones de contexto). Los eventos inválidos se descartan y quedan en el log. Luego elige el analizador del juego (`racing`, `fighting`, `connect4` o `tetris`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
 4. Los resultados se consultan en `GET /results` y `GET /players/{playerId}`.
 
 ### Estructura del repositorio
@@ -59,15 +59,16 @@ gamestats/
 
 ## Juegos y eventos
 
-GameStats analiza cuatro juegos con estructuras distintas, para comprobar que el sistema es genérico y no está pensado para un solo juego. Cada uno toma como referencia un videojuego conocido, en versión simple:
+GameStats analiza cuatro juegos con estructuras distintas, para comprobar que el sistema es genérico y no está pensado para un solo juego. Cada uno toma como referencia un videojuego conocido, en versión simple, de forma que también se pueda programar de verdad más adelante:
 
-| | Racing (carreras) | Football (fútbol) | Fighting (peleas) | Tetris |
+| | Racing (carreras) | Fighting (peleas) | Connect4 (4 en línea) | Tetris |
 |---|---|---|---|---|
-| Referencia | Mario Kart | Arcade retro 6 vs 6 (Nintendo World Cup, Super Sidekicks) | Mortal Kombat | Tetris clásico |
-| Jugadores | Varios, cada uno contra todos | Dos equipos de hasta 6 (5 de campo y portero) | Dos (1 contra 1), por rounds | Uno solo |
-| Qué se mide | Tiempos de vuelta, posiciones y objetos | Acciones discretas y un marcador | Daño, golpes y rounds | Puntaje, líneas y piezas |
-| Interacción entre jugadores | Indirecta (adelantar, chocar, el aceite del otro) | Directa (pases, entradas, asistencias) | Directa (cada golpe tiene un objetivo) | Ninguna |
-| Cómo se decide el ganador | Orden de llegada (`ranking`) | Equipo con más goles; puede haber empate | Quien gana más rounds; puede haber empate | No hay ganador (`null`): se juega contra uno mismo |
+| Referencia | Carrera arcade por posiciones | Street Fighter / Mortal Kombat básico | Connect Four | Tetris clásico |
+| Jugadores | Varios, cada uno contra todos | Dos (1 contra 1), por rounds | Dos, por turnos; uno puede ser la IA | Uno solo |
+| Tiempo | Continuo (vueltas) | Continuo, dividido en rounds | Por turnos | Continuo (pieza a pieza) |
+| Qué se mide | Tiempos de vuelta y posiciones | Daño, golpes y rounds | Fichas, amenazas y bloqueos | Puntaje, líneas y piezas |
+| Interacción entre jugadores | Indirecta (adelantar, chocar) | Directa (cada golpe tiene un objetivo) | Directa (tapar la jugada del rival) | Ninguna |
+| Cómo se decide el ganador | Orden de llegada (`ranking`) | Quien gana más rounds; puede haber empate | Quien hace 4 en línea; tablero lleno = empate | No hay ganador (`null`): se juega contra uno mismo |
 
 ### Tipos de evento (comunes a todos los juegos)
 
@@ -77,20 +78,27 @@ GameStats analiza cuatro juegos con estructuras distintas, para comprobar que el
 
 | Juego | Acciones | Para qué sirven |
 |---|---|---|
-| Racing (12) | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED` | Tiempos de vuelta, posiciones y su línea de tiempo (remontadas), adelantamientos y vueltas sacadas. |
-| | `ITEM_PICKUP`, `ITEM_USED` | Objetos `boost` (nitro), `shield` (escudo) y `oil` (aceite). Cada jugador lleva uno a la vez. |
-| | `DRIFT`, `COLLISION`, `SPIN`, `RESPAWN` | Derrapes, choques y trompos; `RESPAWN` es volver a la pista después de un choque o trompo. |
+| Racing (8) | `LAP_COMPLETED`, `POSITION_CHANGED`, `OVERTAKE`, `LAPPED` | Tiempos de vuelta, posiciones y su línea de tiempo (remontadas, liderar toda la carrera), adelantamientos y vueltas sacadas. |
+| | `COLLISION`, `RESPAWN` | Choques entre dos autos; `RESPAWN` es volver a la pista después de un choque. |
 | | `PENALTY`, `DNF` | Segundos de castigo (cambian el tiempo efectivo y pueden cambiar el ganador) y abandono. |
-| Football (11) | `PASS`, `DRIBBLE` | Precisión de pase y regates exitosos. |
-| | `SHOT`, `POWER_SHOT`, `GOAL`, `OWN_GOAL` | Tiros normales y potentes, goles con asistencia opcional y autogoles (suman para el rival). Con ellos se arma el marcador y su evolución. |
-| | `SAVE`, `TACKLE`, `INTERCEPTION` | Atajadas del portero y balones recuperados. |
-| | `FOUL`, `CORNER` | Faltas con tarjeta (con roja el jugador queda fuera) y córners por equipo. |
-| Fighting (10) | `ATTACK`, `SPECIAL_MOVE`, `COMBO`, `THROW` | Golpes (puño, patada, gancho), especiales, combos y agarres: daño hecho y precisión. |
-| | `BLOCK`, `COMBO_BREAKER`, `KNOCKDOWN` | Defensa (bloquear, cortar el combo del rival) y derribos. |
-| | `FATAL_BLOW`, `ROUND_WON`, `FATALITY` | Golpe fatal (una vez por pelea, solo con poca vida), ganador de cada round (KO o tiempo) y remate final del ganador. |
+| Fighting (6) | `ATTACK`, `COMBO` | Golpes sueltos (puño o patada, pueden fallar) y combos: daño hecho y precisión. |
+| | `BLOCK`, `KNOCKDOWN` | Defensa y derribos. |
+| | `ROUND_WON`, `ROUND_DRAW` | Resultado de cada round: ganado (por KO o por tiempo) o empatado (doble KO, o tiempo con la misma vida). |
+| Connect4 (7) | `DISC_DROPPED` | Cada ficha que se suelta (columna y fila): con ellas se reconstruye el tablero. |
+| | `THREAT_CREATED`, `THREAT_BLOCKED`, `CONNECT_FOUR` | Amenazas (3 en línea con la cuarta casilla libre), amenazas tapadas por el rival y el 4 en línea que gana. |
+| | `TURN_TIMEOUT`, `UNDO`, `HINT_USED` | Turno perdido por tiempo, deshacer una jugada (solo contra la IA) y pedir una pista. |
 | Tetris (13) | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED` | El recorrido de cada pieza: aparece, se mueve, gira, cae y queda fija. |
 | | `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR` | Líneas limpiadas y puntos, giros especiales de la T y tablero vacío. |
 | | `LEVEL_UP`, `STACK_HEIGHT`, `TOP_OUT` | Niveles, altura de la pila y fin de la partida. |
+
+### Por qué estos eventos
+
+Cada acción está porque alimenta una estadística o un patrón, o porque el juego real la necesita para contar lo que pasó. El catálogo cubre todo lo que mandaría cada juego si se programara (por ejemplo, para una interfaz en el proyecto 2), así que no hace falta agregar eventos después.
+
+- **Racing**: una carrera se entiende por vueltas y posiciones. `LAP_COMPLETED` y `POSITION_CHANGED` permiten reconstruir la línea de tiempo de cada piloto (de ahí salen `COMEBACK` y `WIRE_TO_WIRE`), y `PENALTY` cambia el tiempo efectivo. Los objetos, trompos y derrapes se sacaron: complicaban el juego sin aportar estadísticas que no salieran ya de choques y posiciones.
+- **Fighting**: lo mínimo que tiene cualquier juego de pelea: golpes que pueden fallar (precisión), combos (técnica), bloqueos, derribos y el resultado de cada round. `ROUND_DRAW` existe porque en un juego real puede haber doble KO o terminar el tiempo con la misma vida, y sin él no habría forma de registrarlo. Los especiales, agarres y la *fatality* se sacaron para dejar un juego básico.
+- **Connect4**: es el único juego por turnos. `DISC_DROPPED` con columna y fila basta para reconstruir el tablero; `THREAT_CREATED` y `THREAT_BLOCKED` registran la parte estratégica (atacar y defender), y `CONNECT_FOUR` el final. `TURN_TIMEOUT`, `UNDO` y `HINT_USED` son funciones habituales de una versión jugable (tiempo por turno, deshacer y pistas contra la IA).
+- **Tetris**: el recorrido completo de cada pieza y lo que se consigue con ella (líneas, T-spins, tablero vacío), además del nivel y la altura de la pila.
 
 El formato exacto de cada evento (campos, rangos y valores permitidos), del lote que Go envía a Scala y del resultado está en [`contracts/`](contracts/README.md), como JSON Schema y con ejemplos (fixtures) que usan las pruebas de los dos módulos.
 
@@ -98,9 +106,9 @@ El formato exacto de cada evento (campos, rangos y valores permitidos), del lote
 
 Cada evento pasa por tres controles:
 
-1. **Go**, al recibirlo: campos obligatorios, `timestamp` válido, tipo conocido y acción dentro del catálogo del juego.
-2. **Scala, formato**: el `data` de cada acción tiene los campos, tipos, rangos y valores del schema (por ejemplo, `damage` entre 0 y 100, `item` uno de `boost`/`shield`/`oil`, un golpe fallado no hace daño).
-3. **Scala, contexto**: el evento es coherente con lo que ya pasó en la partida. Hay 19 reglas, por ejemplo: no hay acciones durante una pausa; no se puede usar un objeto que no se agarró; nadie juega después de un `DNF`, una roja o un `TOP_OUT`; máximo 6 jugadores por equipo; solo el ganador de la pelea puede hacer la `FATALITY`; el nivel de tetris solo sube.
+1. **Go**, al recibirlo: campos obligatorios, `timestamp` válido, juego y tipo conocidos, y que la acción no sea de otro juego. Una acción que no existe en ningún juego se acepta con un aviso (puede ser un evento nuevo).
+2. **Scala, formato**: el `data` de cada acción tiene los campos, tipos, rangos y valores del schema (por ejemplo, `damage` entre 0 y 100, `column` entre 1 y 7, un golpe fallado no hace daño).
+3. **Scala, contexto**: el evento es coherente con lo que ya pasó en la partida. Hay 20 reglas, por ejemplo: no hay acciones durante una pausa; nadie juega después de un `DNF` o un `TOP_OUT`; `RESPAWN` solo después de un choque; un round tiene un solo resultado; en 4 en línea se juega por turnos, la ficha cae a la primera fila libre y solo se tapa una amenaza que existe; el nivel de tetris solo sube.
 
 Un evento que falla se descarta (con su motivo en el log) y el resto de la partida se analiza igual; el lote completo solo se rechaza si el problema es del lote. Los fixtures `*_invalid_events.json` traen un evento inválido por cada regla, y las pruebas comprueban que se descarten exactamente esos. La lista completa de reglas está en [`contracts/README.md`](contracts/README.md#validaciones-de-contexto).
 
@@ -111,16 +119,20 @@ No obliga a reescribir el sistema:
 - **Go**: agregar el juego y sus acciones al catálogo (`ingestion-go/internal/validation/catalog.go`).
 - **Scala**: agregar sus acciones al modelo (`model/Event.scala`) y su lectura con rangos (`Codecs.parseAction`); un analizador nuevo (`XAnalyzer`) con sus métricas y reglas; si tiene reglas de contexto, un `ContextCheck` propio (`validation/`); y registrarlo en `Analyzer.registry`. Las estadísticas genéricas (duración, eventos por acción, jugadores) y las validaciones comunes (pausa, referencias a otros jugadores) funcionan sin cambios.
 
+Una **acción nueva** de un juego que ya existe ni siquiera necesita eso: Go la acepta con un aviso y Scala la guarda como `UnknownAction`, la cuenta en `eventsByAction` y analiza el resto de la partida igual. Por eso una partida con una acción que salió del contrato (por ejemplo `ITEM_PICKUP`, de cuando racing tenía objetos) se sigue leyendo sin error.
+
 ## Estadísticas y reglas
 
 | | Por jugador | Por partida | Patrones |
 |---|---|---|---|
-| **Racing** | Mejor vuelta, promedio, consistencia (desviación estándar de las vueltas), penalización, tiempo efectivo (vueltas + penalización), adelantamientos, objetos agarrados y usados, nitros, choques provocados | Duración, ganador (primero del `ranking`), eventos por acción | `COMEBACK`: el ganador estuvo 3.º o peor · `CLEAN_RACE`: el ganador no tuvo choques ni penalizaciones · `ITEM_MASTER`: alguien usó los tres objetos |
-| **Football** | Goles, asistencias, tiros, efectividad de tiro (goles / tiros), tiros potentes, precisión de pase, atajadas, recuperaciones (entradas exitosas + intercepciones), regates exitosos | Duración, marcador (con autogoles), ganador (`null` en empate), goles, faltas y córners por equipo | `COMEBACK`: el equipo ganador estuvo perdiendo · `HAT_TRICK`: 3 goles o más de un jugador · `CLEAN_SHEET`: el ganador no recibió goles |
-| **Fighting** | Daño hecho, precisión (golpes que conectaron / intentados), combo más largo, especiales, bloqueos, combos cortados, derribos, rounds ganados | Duración, ganador (más rounds; `null` en empate) | `COMEBACK`: perdió el primer round y ganó la pelea · `FLAWLESS_VICTORY`: ganó un round sin recibir daño · `FATALITY`: remató al rival |
+| **Racing** | Mejor vuelta, promedio, consistencia (desviación estándar de las vueltas), penalización, tiempo efectivo (vueltas + penalización), adelantamientos, choques provocados, vueltas lideradas | Duración, ganador (primero del `ranking`), eventos por acción | `COMEBACK`: el ganador estuvo 3.º o peor · `CLEAN_RACE`: el ganador no tuvo choques ni penalizaciones · `WIRE_TO_WIRE`: el ganador fue 1.º toda la carrera |
+| **Fighting** | Daño hecho, precisión (golpes que conectaron / intentados), combo más largo, bloqueos, derribos, rounds ganados | Duración, ganador (más rounds; `null` en empate) | `COMEBACK`: perdió el primer round y ganó la pelea · `FLAWLESS_VICTORY`: ganó un round sin recibir daño · `COMBO_MASTER`: combo de 5 golpes o más |
+| **Connect4** | Fichas, amenazas creadas, amenazas tapadas, control del centro (proporción de fichas en la columna 4), pistas, deshacer, turnos perdidos | Duración, ganador (quien hace 4 en línea; `null` en empate) | `DOUBLE_THREAT`: dos amenazas abiertas a la vez · `QUICK_WIN`: ganó con 7 fichas o menos · `PERFECT_DEFENSE`: tapó todas las amenazas del rival (al menos 2) |
 | **Tetris** | Puntaje, líneas, tetris (4 líneas de una vez), piezas colocadas, piezas por minuto, nivel máximo, combo máximo, T-spins, hard drops | Duración, eventos por acción (sin ganador) | `BACK_TO_BACK`: dos tetris seguidos · `PERFECT_CLEAR`: tablero vacío · `T_SPIN_MASTER`: 3 T-spins o más |
 
-Casos borde cubiertos: divisiones sin intentos (0.0, nunca se divide entre 0), empates (sin ganador y sin `COMEBACK`), equipo sin goles (aparece con 0), gol sin asistencia, autogol que da vuelta un partido, jugador sin eventos (métricas en 0) y partida sin `MATCH_FINISHED` (sin ganador).
+En connect4, las reglas de contexto y los patrones trabajan sobre el tablero reconstruido evento a evento: el estado de la validación es el tablero, y `UNDO` simplemente vuelve al tablero anterior (los tableros son inmutables, así que basta con guardarlos en una pila).
+
+Casos borde cubiertos: divisiones sin intentos (0.0, nunca se divide entre 0), empates (sin ganador y sin `COMEBACK`), rounds empatados que no suman para nadie, tablero lleno sin ganador, fichas deshechas que no cuentan para `QUICK_WIN`, jugador sin eventos (métricas en 0) y partida sin `MATCH_FINISHED` (sin ganador).
 
 ## Cómo correrlo
 
@@ -144,29 +156,28 @@ curl http://localhost:8080/matches
 docker compose down
 ```
 
-El simulador genera siempre las mismas partidas para la misma semilla (`-seed 42` por defecto): 4 partidas al azar de cada juego y 13 escenarios fijos que prueban los patrones, **29 partidas en total**. Además daña un 3 % de los eventos a propósito, para mostrar que Go los rechaza. Se pueden cambiar las opciones, por ejemplo:
+El simulador genera siempre las mismas partidas para la misma semilla (`-seed 42` por defecto): 4 partidas al azar de cada juego y 14 escenarios fijos que prueban los patrones, **30 partidas en total**. Además daña un 3 % de los eventos a propósito, para mostrar que Go los rechaza. Se pueden cambiar las opciones, por ejemplo:
 
 ```bash
-docker compose run --rm simulator -target http://ingestion:8080 -racing 10 -football 10 -fighting 10 -tetris 10 -seed 7
+docker compose run --rm simulator -target http://ingestion:8080 -racing 10 -fighting 10 -connect4 10 -tetris 10 -seed 7
 ```
 
 | Escenario fijo (seed 42) | Qué pasa | Patrones |
 |---|---|---|
 | `race-s42-comeback` | p4 sale último y gana | `COMEBACK`, `CLEAN_RACE` |
 | `race-s42-penalty` | p1 es el más rápido en pista, pero una penalización de 5 s le hace perder | `CLEAN_RACE` (de p2) |
-| `race-s42-clean` | p1 gana sin choques ni penalizaciones; los demás sí los tienen | `CLEAN_RACE` |
-| `race-s42-items` | p2 usa nitro, escudo y aceite; p4 recibe una vuelta (`LAPPED`) | `ITEM_MASTER`, `CLEAN_RACE` |
-| `race-s42-dnf` | p3 choca y abandona (`DNF`); la carrera se pausa; p2 gana desde el 3.er lugar | `COMEBACK`, `CLEAN_RACE` |
-| `foot-s42-comeback` | B gana 1-0 y A da vuelta 2-1; roja a p12; gol sin asistencia | `COMEBACK` |
-| `foot-s42-draw` | Empate 1-1 (sin ganador); jugadores sin tiros al arco | ninguno |
-| `foot-s42-hattrick` | Hat-trick de p4 (uno de tiro potente); A gana 3-1 | `HAT_TRICK` |
-| `foot-s42-cleansheet` | A gana 3-0 con autogol, tiro potente y 2 atajadas; usa las 11 acciones | `CLEAN_SHEET` |
-| `fight-s42-flawless` | p1 gana el round 1 sin recibir daño y remata con una fatality; usa las 10 acciones | `FLAWLESS_VICTORY`, `FATALITY` |
-| `fight-s42-comeback` | p1 gana el round 1 por tiempo y p2 gana los rounds 2 y 3 | `COMEBACK` |
+| `race-s42-clean` | p1 gana sin choques ni penalizaciones; los demás sí los tienen | `CLEAN_RACE`, `WIRE_TO_WIRE` |
+| `race-s42-wire` | p1 termina primero todas las vueltas, sin ningún cambio de posición | `CLEAN_RACE`, `WIRE_TO_WIRE` |
+| `race-s42-dnf` | p3 choca contra p1 y abandona (`DNF`); p1, el chocado, vuelve a la pista; la carrera se pausa; p2 gana desde el 3.er lugar | `COMEBACK`, `CLEAN_RACE` |
+| `fight-s42-flawless` | p1 gana el round 1 sin recibir daño y la pelea 2-0 | `FLAWLESS_VICTORY` |
+| `fight-s42-comeback` | p1 gana el round 1 por tiempo y p2 gana los rounds 2 y 3, con una pausa | `COMEBACK` |
+| `fight-s42-combo` | Round 1 en doble KO (`ROUND_DRAW`), un combo de 6 golpes y p1 gana 2-0; usa las 6 acciones | `COMBO_MASTER` |
+| `c4-s42-quick` | p1 gana con 4 fichas (vertical) | `QUICK_WIN` |
+| `c4-s42-double` | p1 contra la IA: deshace una mala jugada (`UNDO`), pide una pista y arma dos amenazas a la vez | `DOUBLE_THREAT`, `QUICK_WIN` |
+| `c4-s42-defense` | p2 tapa las dos amenazas de p1; p1 pierde un turno por tiempo y p2 gana | `QUICK_WIN`, `PERFECT_DEFENSE` |
+| `c4-s42-draw` | El tablero se llena (42 fichas) sin 4 en línea: empate | `DOUBLE_THREAT` y `PERFECT_DEFENSE` de los dos (en 42 fichas ambos arman y tapan amenazas) |
 | `tetris-s42-b2b` | Dos tetris seguidos (con `HOLD`) y subida al nivel 2 | `BACK_TO_BACK` |
 | `tetris-s42-perfect` | 3 T-spins y un tetris que deja el tablero vacío, con pausa | `PERFECT_CLEAR`, `T_SPIN_MASTER` |
-
-En football, p1 y p7 son los porteros de A y B.
 
 ### Opción 2: sin Docker
 
