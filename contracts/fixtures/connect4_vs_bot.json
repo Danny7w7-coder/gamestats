@@ -1,0 +1,32 @@
+{
+  "matchId": "c4-002",
+  "gameId": "connect4",
+  "gameVersion": "1.0",
+  "startedAt": "2026-10-07T19:00:00Z",
+  "finishedAt": "2026-10-07T19:00:54Z",
+  "players": ["p1", "cpu"],
+  "events": [
+    { "eventId": "c2-e01", "timestamp": "2026-10-07T19:00:00Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "type": "MATCH_STARTED", "data": {} },
+    { "eventId": "c2-e02", "timestamp": "2026-10-07T19:00:01Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_JOINED", "data": { "color": "red" } },
+    { "eventId": "c2-e03", "timestamp": "2026-10-07T19:00:02Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_JOINED", "data": { "color": "yellow", "bot": true, "difficulty": "medium" } },
+    { "eventId": "c2-e04", "timestamp": "2026-10-07T19:00:06Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 4, "row": 1 } },
+    { "eventId": "c2-e05", "timestamp": "2026-10-07T19:00:10Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 4, "row": 2 } },
+    { "eventId": "c2-e06", "timestamp": "2026-10-07T19:00:14Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 3, "row": 1 } },
+    { "eventId": "c2-e07", "timestamp": "2026-10-07T19:00:18Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 3, "row": 2 } },
+    { "eventId": "c2-e08", "timestamp": "2026-10-07T19:00:22Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 1, "row": 1 } },
+    { "eventId": "c2-e09", "timestamp": "2026-10-07T19:00:22.500Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "THREAT_CREATED", "data": { "column": 2, "row": 1 } },
+    { "eventId": "c2-e10", "timestamp": "2026-10-07T19:00:26.500Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 2, "row": 1 } },
+    { "eventId": "c2-e11", "timestamp": "2026-10-07T19:00:27Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "THREAT_BLOCKED", "data": { "column": 2, "row": 1, "attackerId": "p1" } },
+    { "eventId": "c2-e12", "timestamp": "2026-10-07T19:00:31Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "UNDO", "data": { "column": 2, "row": 1 } },
+    { "eventId": "c2-e13", "timestamp": "2026-10-07T19:00:34Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "UNDO", "data": { "column": 1, "row": 1 } },
+    { "eventId": "c2-e14", "timestamp": "2026-10-07T19:00:37Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "HINT_USED", "data": { "column": 5 } },
+    { "eventId": "c2-e15", "timestamp": "2026-10-07T19:00:40Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 5, "row": 1 } },
+    { "eventId": "c2-e16", "timestamp": "2026-10-07T19:00:40.500Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "THREAT_CREATED", "data": { "column": 2, "row": 1 } },
+    { "eventId": "c2-e17", "timestamp": "2026-10-07T19:00:41Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "THREAT_CREATED", "data": { "column": 6, "row": 1 } },
+    { "eventId": "c2-e18", "timestamp": "2026-10-07T19:00:45Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 6, "row": 1 } },
+    { "eventId": "c2-e19", "timestamp": "2026-10-07T19:00:45.500Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "cpu", "type": "PLAYER_ACTION", "action": "THREAT_BLOCKED", "data": { "column": 6, "row": 1, "attackerId": "p1" } },
+    { "eventId": "c2-e20", "timestamp": "2026-10-07T19:00:49.500Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "DISC_DROPPED", "data": { "column": 2, "row": 1 } },
+    { "eventId": "c2-e21", "timestamp": "2026-10-07T19:00:50Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "playerId": "p1", "type": "PLAYER_ACTION", "action": "CONNECT_FOUR", "data": { "direction": "horizontal" } },
+    { "eventId": "c2-e22", "timestamp": "2026-10-07T19:00:54Z", "gameId": "connect4", "gameVersion": "1.0", "matchId": "c4-002", "type": "MATCH_FINISHED", "data": {} }
+  ]
+}

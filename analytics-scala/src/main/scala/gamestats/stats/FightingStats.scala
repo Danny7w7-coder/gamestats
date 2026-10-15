@@ -1,17 +1,17 @@
 package gamestats.stats
 
 import gamestats.model.*
-import gamestats.rules.{FatalityRule, FightingComebackRule, FlawlessVictoryRule, Rule}
+import gamestats.rules.{ComboMasterRule, FightingComebackRule, FlawlessVictoryRule, Rule}
 import gamestats.validation.{ContextCheck, FightingCheck}
 
-/** Análisis de peleas 1 contra 1 por rounds, estilo Mortal Kombat. Todo puro. */
+/** Análisis de peleas básicas 1 contra 1 por rounds. Todo puro. */
 object FightingAnalyzer extends GameAnalyzer:
 
   import GenericStats.countOf
 
   val gameId: String = "fighting"
 
-  override def rules: List[Rule] = List(FightingComebackRule, FlawlessVictoryRule, FatalityRule)
+  override def rules: List[Rule] = List(FightingComebackRule, FlawlessVictoryRule, ComboMasterRule)
 
   override def context: ContextCheck = FightingCheck
 
@@ -22,7 +22,6 @@ object FightingAnalyzer extends GameAnalyzer:
       matchId = batch.matchId,
       gameId = gameId,
       matchStats = GenericStats.matchStats(batch).copy(winner = winner(batch)),
-      teamStats = None,
       playerStats = batch.players.map(p => PlayerStats(p, metrics(byPlayer.getOrElse(p, Nil)))),
       patterns = Nil
     )
@@ -31,23 +30,16 @@ object FightingAnalyzer extends GameAnalyzer:
   // Por jugador
   // ---------------------------------------------------------------------------
 
-  /** Daño de cada golpe que conectó (los que fallan ya traen damage 0). */
+  /** Daño de golpes y combos (un golpe que falla ya trae damage 0). */
   val damages: List[Event] => List[Int] =
     _.flatMap(_.action).collect {
-      case Attack(_, _, _, d, _)      => d
-      case SpecialMove(_, _, _, d, _) => d
-      case Combo(_, _, d, _)          => d
-      case Throw(_, d, _)             => d
-      case FatalBlow(_, _, d, _, _)   => d
+      case Attack(_, _, _, d, _) => d
+      case Combo(_, _, d, _)     => d
     }
 
-  /** Golpes que pueden fallar (ataque, especial y golpe fatal): si conectaron o no. */
+  /** Golpes sueltos (ATTACK): si conectaron o no. Un combo siempre conecta. */
   val strikes: List[Event] => List[Boolean] =
-    _.flatMap(_.action).collect {
-      case Attack(_, _, hit, _, _)      => hit
-      case SpecialMove(_, _, hit, _, _) => hit
-      case FatalBlow(_, hit, _, _, _)   => hit
-    }
+    _.flatMap(_.action).collect { case Attack(_, _, hit, _, _) => hit }
 
   val damageDealt: List[Event] => Double = damages andThen (_.sum.toDouble)
 
@@ -59,22 +51,18 @@ object FightingAnalyzer extends GameAnalyzer:
   val maxCombo: List[Event] => Double =
     _.flatMap(_.action).collect { case Combo(_, hits, _, _) => hits }.maxOption.fold(0.0)(_.toDouble)
 
-  val specials: List[Event] => Double      = countOf { case _: SpecialMove => }
-  val blocks: List[Event] => Double        = countOf { case _: Block => }
-  val comboBreakers: List[Event] => Double = countOf { case _: ComboBreaker => }
-  val knockdowns: List[Event] => Double    = countOf { case _: Knockdown => }
-  val roundsWon: List[Event] => Double     = countOf { case _: RoundWon => }
+  val blocks: List[Event] => Double     = countOf { case _: Block => }
+  val knockdowns: List[Event] => Double = countOf { case _: Knockdown => }
+  val roundsWon: List[Event] => Double  = countOf { case _: RoundWon => }
 
   def metrics(events: List[Event]): Map[String, Double] =
     Map(
-      "damageDealt"   -> damageDealt(events),
-      "accuracy"      -> accuracy(events),
-      "maxCombo"      -> maxCombo(events),
-      "specials"      -> specials(events),
-      "blocks"        -> blocks(events),
-      "comboBreakers" -> comboBreakers(events),
-      "knockdowns"    -> knockdowns(events),
-      "roundsWon"     -> roundsWon(events)
+      "damageDealt" -> damageDealt(events),
+      "accuracy"    -> accuracy(events),
+      "maxCombo"    -> maxCombo(events),
+      "blocks"      -> blocks(events),
+      "knockdowns"  -> knockdowns(events),
+      "roundsWon"   -> roundsWon(events)
     )
 
   // ---------------------------------------------------------------------------

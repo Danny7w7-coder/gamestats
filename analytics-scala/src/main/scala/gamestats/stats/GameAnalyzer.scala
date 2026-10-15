@@ -24,7 +24,6 @@ case class BaseAnalyzer(gameId: String) extends GameAnalyzer:
       matchId = batch.matchId,
       gameId = gameId,
       matchStats = GenericStats.matchStats(batch),
-      teamStats = None,
       playerStats = Nil,
       patterns = Nil
     )
@@ -33,7 +32,7 @@ object Analyzer:
 
   /** Juegos soportados. Agregar un juego = agregar su analyzer a esta lista. */
   val registry: Map[String, GameAnalyzer] =
-    List(RacingAnalyzer, FootballAnalyzer, FightingAnalyzer, TetrisAnalyzer)
+    List(RacingAnalyzer, FightingAnalyzer, Connect4Analyzer, TetrisAnalyzer)
       .map(a => a.gameId -> a) // map: cada analyzer queda indexado por su gameId
       .toMap
 

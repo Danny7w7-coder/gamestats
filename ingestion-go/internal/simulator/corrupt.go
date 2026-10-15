@@ -13,7 +13,8 @@ import (
 // COPIA dañada (con eventId "<original>-bad"). Devuelve cuántas agregó.
 //
 // Se agregan copias en vez de dañar los originales para que las partidas
-// sigan completas: si se dañara un SHOT, Scala recibiría un GOAL sin su tiro;
+// sigan completas: si se dañara un DISC_DROPPED, el tablero de connect4 quedaría
+// distinto y las amenazas y el 4 en línea de después no tendrían sentido;
 // si se dañara MATCH_FINISHED, la partida nunca terminaría.
 //
 // No se tocan los escenarios guionizados. El daño usa su propio generador

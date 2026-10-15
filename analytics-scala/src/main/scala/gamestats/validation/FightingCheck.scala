@@ -2,24 +2,16 @@ package gamestats.validation
 
 import gamestats.model.*
 
-/** Validaciones de contexto de fighting estilo Mortal Kombat (contracts/README.md). */
+/** Validaciones de contexto de fighting (contracts/README.md). */
 object FightingCheck extends ContextCheck:
 
   /** Lo que se sabe de la pelea hasta el evento actual.
     *  - rounds: máximo de rounds (MATCH_STARTED.data.rounds).
-    *  - comboOn: víctima -> (quién le hizo el último combo, en qué round), si no lo cortó.
-    *  - fatalBlowUsed: jugadores que ya usaron su FATAL_BLOW.
-    *  - wins: rounds ganados por jugador; roundsDone: rounds que ya tienen ganador.
-    *  - finished: ya hubo FATALITY, la pelea terminó.
+    *  - wins: rounds ganados por jugador.
+    *  - roundsDone: rounds que ya tienen resultado (ganador o empate).
+    *  - champion: quien ya ganó la pelea (llegó a la mayoría de los rounds).
     */
-  case class State(
-      rounds: Option[Int],
-      comboOn: Map[String, (String, Int)],
-      fatalBlowUsed: Set[String],
-      wins: Map[String, Int],
-      roundsDone: Set[Int],
-      finished: Boolean
-  )
+  case class State(rounds: Option[Int], wins: Map[String, Int], roundsDone: Set[Int], champion: Option[String])
 
   def initial(batch: MatchBatch): State =
     val rounds = batch.events
@@ -28,7 +20,7 @@ object FightingCheck extends ContextCheck:
       .flatMap(_.get("rounds"))
       .flatMap(_.numOpt)
       .map(_.toInt)
-    State(rounds, Map.empty, Set.empty, Map.empty, Set.empty, finished = false)
+    State(rounds, Map.empty, Set.empty, champion = None)
 
   /** Rounds que hay que ganar para llevarse la pelea (mayoría: 2 de 3, 3 de 5). */
   def roundsToWin(s: State): Int = s.rounds.getOrElse(1) / 2 + 1
@@ -36,7 +28,7 @@ object FightingCheck extends ContextCheck:
   def check(s: State, event: Event): Either[String, State] =
     event.playerId.zip(event.action) match
       case None => Right(s)
-      case Some(_) if s.finished => Left("la pelea ya terminó con la FATALITY")
+      case Some(_) if s.champion.isDefined => Left(s"la pelea ya terminó: la ganó ${s.champion.getOrElse("")}")
       case Some((p, a)) =>
         for
           _    <- roundOf(a).filter(r => s.rounds.exists(r > _))
@@ -46,31 +38,24 @@ object FightingCheck extends ContextCheck:
         yield next
 
   private def action(s: State, p: String, a: GameAction): Either[String, State] = a match
-    case Combo(target, _, _, r) =>
-      Right(s.copy(comboOn = s.comboOn.updated(target, p -> r)))
-    case ComboBreaker(attacker, r) =>
-      Either.cond(s.comboOn.get(p).contains(attacker -> r), s.copy(comboOn = s.comboOn.removed(p)),
-        s"no hay un combo de $attacker que cortar en el round $r")
-    case _: FatalBlow =>
-      Either.cond(!s.fatalBlowUsed.contains(p), s.copy(fatalBlowUsed = s.fatalBlowUsed + p),
-        s"$p ya usó su FATAL_BLOW")
     case RoundWon(r, _, _) =>
-      Either.cond(!s.roundsDone.contains(r),
-        s.copy(roundsDone = s.roundsDone + r, wins = s.wins.updated(p, s.wins.getOrElse(p, 0) + 1)),
-        s"el round $r ya tiene ganador")
-    case _: Fatality =>
-      Either.cond(s.wins.getOrElse(p, 0) >= roundsToWin(s), s.copy(finished = true),
-        s"$p no ganó la pelea, no puede hacer la FATALITY")
+      for _ <- open(s, r) yield
+        val wins = s.wins.updated(p, s.wins.getOrElse(p, 0) + 1)
+        // Option.when: solo hay campeón si este round lo llevó a la mayoría.
+        s.copy(wins = wins, roundsDone = s.roundsDone + r, champion = Option.when(wins(p) >= roundsToWin(s))(p))
+    case RoundDraw(r, _, _) =>
+      open(s, r).map(_ => s.copy(roundsDone = s.roundsDone + r))
     case _ => Right(s)
 
+  /** Un round admite un solo resultado: ROUND_WON o ROUND_DRAW. */
+  private def open(s: State, r: Int): Either[String, Unit] =
+    Either.cond(!s.roundsDone.contains(r), (), s"el round $r ya tiene resultado")
+
   private def roundOf(a: GameAction): Option[Int] = a match
-    case Attack(_, _, _, _, r)      => Some(r)
-    case SpecialMove(_, _, _, _, r) => Some(r)
-    case Combo(_, _, _, r)          => Some(r)
-    case Throw(_, _, r)             => Some(r)
-    case Block(_, r)                => Some(r)
-    case ComboBreaker(_, r)         => Some(r)
-    case Knockdown(_, r)            => Some(r)
-    case FatalBlow(_, _, _, _, r)   => Some(r)
-    case RoundWon(r, _, _)          => Some(r)
-    case _                          => None
+    case Attack(_, _, _, _, r) => Some(r)
+    case Combo(_, _, _, r)     => Some(r)
+    case Block(_, r)           => Some(r)
+    case Knockdown(_, r)       => Some(r)
+    case RoundWon(r, _, _)     => Some(r)
+    case RoundDraw(r, _, _)    => Some(r)
+    case _                     => None

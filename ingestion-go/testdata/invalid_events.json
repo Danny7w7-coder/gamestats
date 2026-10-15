@@ -5,6 +5,6 @@
   {"eventId": "bad-r4", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "playerId": "p1", "type": "PLAYER_DANCED", "data": {}},
   {"eventId": "bad-r5", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "type": "PLAYER_ACTION", "action": "LAP_COMPLETED", "data": {"lap": 1, "lapTimeMs": 82000, "position": 1}},
   {"eventId": "bad-r6a", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "playerId": "p1", "type": "PLAYER_ACTION", "data": {}},
-  {"eventId": "bad-r6b", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "playerId": "p1", "type": "PLAYER_ACTION", "action": "GOAL", "data": {"teamId": "A", "minute": 5}},
+  {"eventId": "bad-r6b", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "playerId": "p1", "type": "PLAYER_ACTION", "action": "CONNECT_FOUR", "data": {"direction": "vertical"}},
   {"eventId": "bad-r7", "timestamp": "2026-10-05T14:00:00Z", "gameId": "racing", "gameVersion": "1.0", "matchId": "race-900", "type": "MATCH_STARTED", "action": "LAP_COMPLETED", "data": {"track": "monza", "laps": 3}}
 ]

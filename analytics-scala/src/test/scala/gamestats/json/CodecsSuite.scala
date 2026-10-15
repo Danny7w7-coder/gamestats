@@ -45,20 +45,20 @@ class CodecsSuite extends munit.FunSuite:
     assertEquals(p1Laps, List(82000L, 81500L, 80900L))
     assert(b.events.flatMap(_.action).contains(Penalty(5, "track_limits")))
 
-  test("parsea football_match_ok.json sin error"):
-    val b = Codecs.parseBatch(Fixtures.json("football_match_ok.json")).fold(fail(_), identity)
-    assertEquals(b.matchId, "foot-001")
-    assertEquals(b.events.size, 26)
-    assertEquals(b.players, List("p1", "p2", "p3", "p4"))
+  test("parsea connect4_vs_bot.json sin error"):
+    val b = Codecs.parseBatch(Fixtures.json("connect4_vs_bot.json")).fold(fail(_), identity)
+    assertEquals(b.matchId, "c4-002")
+    assertEquals(b.events.size, 22)
+    assertEquals(b.players, List("p1", "cpu"))
     val actions = b.events.flatMap(_.action)
-    assert(actions.contains(Goal("A", Some("p2"), 5)))
-    assert(actions.contains(Goal("A", None, 61)), "gol sin asistencia -> assistId = None")
-    assert(actions.contains(Foul("B", Card.Yellow, 20, Some("p1"))))
-    assert(actions.contains(Foul("A", Card.None, 52, Some("p3"))))
+    assert(actions.contains(Undo(2, 1)))
+    assert(actions.contains(HintUsed(5)))
+    assert(actions.contains(ThreatBlocked(6, 1, "p1")))
+    assert(actions.contains(ConnectFour(Line.Horizontal)))
 
   test("parsea los fixtures de remontada"):
     assert(Codecs.parseBatch(Fixtures.json("comeback_case.json")).isRight)
-    assert(Codecs.parseBatch(Fixtures.json("football_comeback.json")).isRight)
+    assert(Codecs.parseBatch(Fixtures.json("fighting_comeback.json")).isRight)
 
   // --- Genericidad -----------------------------------------------------------
 
@@ -69,6 +69,10 @@ class CodecsSuite extends munit.FunSuite:
     assertEquals(parsed.action, Some(UnknownAction("DANCE", data)))
     // Y el lote completo también pasa.
     assert(Codecs.parseBatch(batch(e)).isRight)
+
+  test("una acción que salió del contrato (ITEM_PICKUP) también queda como UnknownAction"):
+    val data = ujson.Obj("lap" -> 1, "item" -> "boost")
+    assertEquals(Codecs.parseAction("ITEM_PICKUP", data), Right(UnknownAction("ITEM_PICKUP", data)))
 
   // --- Errores ----------------------------------------------------------------
 
@@ -120,7 +124,7 @@ class CodecsSuite extends munit.FunSuite:
     assert(Codecs.parseBatch(batch(event(), bad)).left.exists(_.startsWith("events[1]: e2: 'timestamp'")))
 
   test("un lote sin problemas no tiene descartados"):
-    assertEquals(Codecs.parseBatch(Fixtures.json("football_match_ok.json")).map(_.skipped), Right(Nil))
+    assertEquals(Codecs.parseBatch(Fixtures.json("connect4_match_ok.json")).map(_.skipped), Right(Nil))
 
   test("PLAYER_ACTION sin playerId produce Left"):
     val e = event("type" -> "PLAYER_ACTION", "action" -> "PENALTY", "data" -> ujson.Obj("seconds" -> 5, "reason" -> "x"))

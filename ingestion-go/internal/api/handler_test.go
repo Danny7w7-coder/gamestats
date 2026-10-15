@@ -19,11 +19,17 @@ const validEv = `{"eventId":"e1","timestamp":"2026-10-05T14:01:22Z","gameId":"ra
 	"gameVersion":"1.0","matchId":"race-001","playerId":"p1","type":"PLAYER_ACTION",
 	"action":"LAP_COMPLETED","data":{"lap":1}}`
 
-// newTestHandler crea un Handler que escribe el log en una carpeta temporal.
+// newTestHandler crea un Handler que escribe los logs en una carpeta
+// temporal. Devuelve la ruta del log de rechazados.
 func newTestHandler(t *testing.T) (*Handler, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "rejected.jsonl")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rejected.jsonl")
 	l, err := rejected.New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := rejected.New(filepath.Join(dir, "unknown_actions.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +43,9 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 	t.Cleanup(func() {
 		d.Close()
 		l.Close()
+		unknown.Close()
 	})
-	return &Handler{Rejected: l, Store: store, Pipeline: d}, path
+	return &Handler{Rejected: l, Unknown: unknown, Store: store, Pipeline: d}, path
 }
 
 func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
@@ -49,7 +56,7 @@ func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
 }
 
 func TestEvents(t *testing.T) {
-	gameGoalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1)
+	gameGoalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1)
 	badTimestampType := strings.Replace(validEv, `"2026-10-05T14:01:22Z"`, `5`, 1)
 
 	tests := []struct {
@@ -104,11 +111,11 @@ func TestEvents(t *testing.T) {
 
 func TestEventsRejectedReason(t *testing.T) {
 	h, _ := newTestHandler(t)
-	rec := postEvents(h, strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1))
+	rec := postEvents(h, strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1))
 
 	var resp eventsResponse
 	json.Unmarshal(rec.Body.Bytes(), &resp)
-	want := rejection{EventID: "e1", Reason: `la acción "GOAL" no existe en el juego "racing"`}
+	want := rejection{EventID: "e1", Reason: `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")`}
 	if len(resp.Rejected) != 1 || resp.Rejected[0] != want {
 		t.Fatalf("rejected = %+v, se esperaba %+v", resp.Rejected, want)
 	}
@@ -117,7 +124,7 @@ func TestEventsRejectedReason(t *testing.T) {
 // Solo los eventos aceptados deben llegar al store.
 func TestMatchesAfterEvents(t *testing.T) {
 	h, _ := newTestHandler(t)
-	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"GOAL"`, 1)
+	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1)
 	postEvents(h, "["+validEv+","+goalInRacing+"]")
 
 	req := httptest.NewRequest(http.MethodGet, "/matches", nil)
@@ -159,5 +166,35 @@ func TestEventsBodyTooLarge(t *testing.T) {
 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, se esperaba %d", rec.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
+// Una acción que no existe en ningún juego se acepta, aparece en "warnings"
+// y queda anotada en unknown_actions.jsonl. Una acción de otro juego se
+// sigue rechazando.
+func TestUnknownActionAcceptedWithWarning(t *testing.T) {
+	h, path := newTestHandler(t)
+	unknownEv := strings.Replace(validEv, `"LAP_COMPLETED"`, `"BOOST_JUMP"`, 1)
+	otherGameEv := strings.Replace(strings.Replace(validEv, `"LAP_COMPLETED"`, `"TOP_OUT"`, 1), `"e1"`, `"e2"`, 1)
+
+	rec := postEvents(h, "["+unknownEv+","+otherGameEv+"]")
+
+	var resp eventsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Accepted != 1 || len(resp.Warnings) != 1 || resp.Warnings[0].EventID != "e1" {
+		t.Fatalf("respuesta = %+v, se esperaba e1 aceptado con aviso", resp)
+	}
+	if len(resp.Rejected) != 1 || resp.Rejected[0].EventID != "e2" {
+		t.Fatalf("rechazados = %+v, se esperaba e2 (acción de tetris)", resp.Rejected)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "unknown_actions.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(string(raw), "\n"); lines != 1 || !strings.Contains(string(raw), "BOOST_JUMP") {
+		t.Fatalf("unknown_actions.jsonl = %q", raw)
 	}
 }

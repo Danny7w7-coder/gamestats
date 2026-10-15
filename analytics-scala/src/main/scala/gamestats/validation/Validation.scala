@@ -3,7 +3,7 @@ package gamestats.validation
 import gamestats.model.*
 
 /** Validaciones de un juego que dependen de otros eventos de la partida (por
-  * ejemplo, "no se puede usar un objeto que no se agarró"). Cada juego lleva su
+  * ejemplo, "en 4 en línea no se juega dos veces seguidas"). Cada juego lleva su
   * propio estado (`State`) y lo va actualizando evento a evento.
   */
 trait ContextCheck:
@@ -27,7 +27,7 @@ object ContextCheck:
 object Validation:
 
   /** Campos de `data` que nombran a otro jugador de la partida. */
-  val PlayerRefs: List[String] = List("targetId", "overtakenId", "otherId", "lappedId", "attackerId", "assistId")
+  val PlayerRefs: List[String] = List("targetId", "overtakenId", "otherId", "lappedId", "attackerId")
 
   /** Lo que se acumula al recorrer los eventos: el estado de las reglas comunes
     * (pausa), el del juego, y los eventos aceptados y descartados (al revés).

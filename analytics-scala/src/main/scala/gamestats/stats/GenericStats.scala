@@ -6,7 +6,7 @@ import java.time.Duration
 
 /** Estadísticas que sirven para cualquier juego: solo usan el lote y los nombres
   * de las acciones, nunca acciones concretas. Cada analyzer parte de aquí y
-  * completa `winner`/`score` con `copy`.
+  * completa `winner` con `copy`.
   */
 object GenericStats:
 
@@ -16,8 +16,7 @@ object GenericStats:
       totalEvents = batch.events.size,
       playerCount = batch.players.size,
       eventsByAction = eventsByAction(batch.events),
-      winner = None,
-      score = None
+      winner = None
     )
 
   /** Cuántas acciones cumplen el patrón. Recibe una función parcial

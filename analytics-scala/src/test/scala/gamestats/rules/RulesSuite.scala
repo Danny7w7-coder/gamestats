@@ -5,8 +5,6 @@ import gamestats.json.Codecs
 import gamestats.model.*
 import gamestats.stats.Analyzer
 
-import java.time.Instant
-
 class RulesSuite extends munit.FunSuite:
 
   def load(name: String): MatchBatch = Codecs.parseBatch(Fixtures.json(name)).fold(fail(_), identity)
@@ -16,8 +14,6 @@ class RulesSuite extends munit.FunSuite:
 
   val raceOk: MatchBatch       = load("racing_match_ok.json")
   val raceComeback: MatchBatch = load("comeback_case.json")
-  val footOk: MatchBatch       = load("football_match_ok.json")
-  val footComeback: MatchBatch = load("football_comeback.json")
 
   // --- Fixtures: los de remontada dan el patrón, los *_ok no dan ninguno -------
 
@@ -30,16 +26,9 @@ class RulesSuite extends munit.FunSuite:
       )
     )
 
-  test("football_comeback: goles B, A, A => COMEBACK del equipo A, sin playerId"):
-    assertEquals(
-      patternsOf(footComeback),
-      List(Pattern("COMEBACK", None, "El equipo A remontó y ganó 2-1"))
-    )
-
-  test("los fixtures *_ok no tienen remontada; en racing_match_ok p1 gana limpio"):
+  test("racing_match_ok no tiene remontada; p1 gana limpio"):
     // p3 tiene la penalización, no p1: la carrera del ganador es limpia.
     assertEquals(patternsOf(raceOk), List(Pattern("CLEAN_RACE", Some("p1"), "p1 ganó sin choques ni penalizaciones")))
-    assertEquals(patternsOf(footOk), Nil)
 
   // --- Racing -------------------------------------------------------------------
 
@@ -60,40 +49,24 @@ class RulesSuite extends munit.FunSuite:
     val unfinished = raceComeback.copy(events = raceComeback.events.filterNot(_.eventType == EventType.MatchFinished))
     assertEquals(RacingComebackRule.detect(unfinished), Nil)
 
-  // --- Football -----------------------------------------------------------------
+  // --- WIRE_TO_WIRE ---------------------------------------------------------------
 
-  test("football: goles A, A, B => sin COMEBACK (A nunca fue perdiendo)"):
-    val end = FootballComebackRule.replayGoals(footOk)
-    assertEquals(end.score, Map("A" -> 2, "B" -> 1))
-    assertEquals(end.everBehind, Set("B"))
-    assertEquals(FootballComebackRule.detect(footOk), Nil)
+  test("WIRE_TO_WIRE: el ganador que estuvo 2° en algún momento no cuenta"):
+    assertEquals(WireToWireRule.detect(raceOk), Nil)
+    assertEquals(WireToWireRule.detect(raceComeback), Nil)
 
-  test("football: goles B, A, A => A estuvo perdiendo y ganó"):
-    assertEquals(FootballComebackRule.replayGoals(footComeback).everBehind, Set("A", "B"))
-
-  test("football: empate => sin COMEBACK aunque alguien haya ido perdiendo"):
-    // foot-002 sin el último gol de A: B 1-0, luego 1-1.
-    val draw = footComeback.copy(events = footComeback.events.filterNot(_.eventId == "f2-e15"))
-    assertEquals(FootballComebackRule.replayGoals(draw).everBehind, Set("A"))
-    assertEquals(FootballComebackRule.detect(draw), Nil)
-
-  // --- HAT_TRICK ------------------------------------------------------------------
-
-  /** foot-001 con un gol más de p1 al final (3 en total). */
-  val hatTrick: MatchBatch =
-    val goal = footOk.events.find(_.eventId == "f1-e18").getOrElse(fail("falta f1-e18"))
-    val extra = goal.copy(eventId = "f1-extra", timestamp = Instant.parse("2026-10-05T17:28:00Z"))
-    footOk.copy(events = (footOk.events :+ extra).sortBy(_.timestamp))
-
-  test("HAT_TRICK: 3 goles del mismo jugador"):
-    assertEquals(HatTrickRule.detect(hatTrick), List(Pattern("HAT_TRICK", Some("p1"), "p1 anotó 3 goles")))
-    assert(patternsOf(hatTrick).exists(_.rule == "HAT_TRICK"))
-
-  test("HAT_TRICK: con 2 goles no hay patrón"):
-    assertEquals(HatTrickRule.detect(footOk), Nil)
+  test("WIRE_TO_WIRE: el ganador que solo tiene posiciones 1 sí cuenta"):
+    // race-001 sin los eventos donde p1 aparece fuera del 1°.
+    val onlyFirst = raceOk.copy(events = raceOk.events.filterNot {
+      case Event(_, _, _, _, _, Some("p1"), _, Some(LapCompleted(_, _, pos)), _) => pos != 1
+      case Event(_, _, _, _, _, Some("p1"), _, Some(_: PositionChanged), _)      => true
+      case _                                                                      => false
+    })
+    assertEquals(WireToWireRule.detect(onlyFirst), List(Pattern("WIRE_TO_WIRE", Some("p1"), "p1 lideró la carrera de principio a fin")))
 
   // --- Integración ------------------------------------------------------------------
 
   test("cada juego corre solo sus reglas"):
-    assertEquals(gamestats.stats.RacingAnalyzer.rules.map(_.name), List("COMEBACK", "CLEAN_RACE", "ITEM_MASTER"))
-    assertEquals(gamestats.stats.FootballAnalyzer.rules.map(_.name), List("COMEBACK", "HAT_TRICK", "CLEAN_SHEET"))
+    assertEquals(gamestats.stats.RacingAnalyzer.rules.map(_.name), List("COMEBACK", "CLEAN_RACE", "WIRE_TO_WIRE"))
+    assertEquals(gamestats.stats.FightingAnalyzer.rules.map(_.name), List("COMEBACK", "FLAWLESS_VICTORY", "COMBO_MASTER"))
+    assertEquals(gamestats.stats.Connect4Analyzer.rules.map(_.name), List("DOUBLE_THREAT", "QUICK_WIN", "PERFECT_DEFENSE"))

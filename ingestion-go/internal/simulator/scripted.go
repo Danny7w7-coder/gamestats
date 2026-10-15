@@ -19,14 +19,15 @@ func scriptedMatches(seed int64) []Match {
 		raceComeback(id("race", "comeback"), scriptBase),
 		racePenaltyChangesResult(id("race", "penalty"), scriptBase.Add(10*time.Minute)),
 		raceClean(id("race", "clean"), scriptBase.Add(20*time.Minute)),
-		raceItemMaster(id("race", "items"), scriptBase.Add(30*time.Minute)),
+		raceWireToWire(id("race", "wire"), scriptBase.Add(30*time.Minute)),
 		racePauseDNF(id("race", "dnf"), scriptBase.Add(40*time.Minute)),
-		footballComeback(id("foot", "comeback"), scriptBase.Add(1*time.Hour)),
-		footballDraw(id("foot", "draw"), scriptBase.Add(3*time.Hour)),
-		footballHatTrick(id("foot", "hattrick"), scriptBase.Add(5*time.Hour)),
-		footballCleanSheet(id("foot", "cleansheet"), scriptBase.Add(7*time.Hour)),
+		connect4Quick(id("c4", "quick"), scriptBase.Add(1*time.Hour)),
+		connect4Double(id("c4", "double"), scriptBase.Add(1*time.Hour+15*time.Minute)),
+		connect4Defense(id("c4", "defense"), scriptBase.Add(1*time.Hour+30*time.Minute)),
+		connect4Draw(id("c4", "draw"), scriptBase.Add(1*time.Hour+45*time.Minute)),
 		fightFlawless(id("fight", "flawless"), scriptBase.Add(9*time.Hour)),
 		fightComeback(id("fight", "comeback"), scriptBase.Add(9*time.Hour+10*time.Minute)),
+		fightCombo(id("fight", "combo"), scriptBase.Add(9*time.Hour+20*time.Minute)),
 		tetrisBackToBack(id("tetris", "b2b"), scriptBase.Add(10*time.Hour)),
 		tetrisPerfectClear(id("tetris", "perfect"), scriptBase.Add(10*time.Hour+30*time.Minute)),
 	}
@@ -75,50 +76,34 @@ func raceClean(id string, start time.Time) Match {
 		{80500, 87000, 82500, 83000}, // p2 pierde 5.5 s por el choque
 		{80500, 81500, 82000, 83000},
 	}
-	actions := []raceAction{
-		{driver: 0, lap: 1, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 1, "corner": 3, "durationMs": 1800}},
-		{driver: 0, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "boost"}},
-		{driver: 0, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "boost", "durationMs": 2500}},
-		{driver: 1, lap: 2, at: 0.45, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p3", "damage": 40}},
-		{driver: 1, lap: 2, at: 0.47, action: "RESPAWN"},
-		{driver: 3, lap: 3, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 3, "corner": 6, "durationMs": 1200}},
-	}
+	crashes := []raceCrash{{driver: 1, other: 2, lap: 2, at: crashAt, damage: 40, respawnDriver: true}}
 	penalties := []racePenalty{{driver: 2, lap: 3, seconds: 5, reason: "corner_cutting"}}
-	m := buildRace(id, start, racePlan{track: "desert_dunes", lapTimes: lapTimes, actions: actions, penalties: penalties})
+	m := buildRace(id, start, racePlan{track: "desert_dunes", lapTimes: lapTimes, crashes: crashes, penalties: penalties})
 	m.Script = "carrera limpia: p1 gana sin choques ni penalizaciones"
 	return m
 }
 
-// raceItemMaster: p2 usa los 3 objetos (nitro, escudo y aceite, uno por
-// vuelta) y gana (ITEM_MASTER). p3 hace un trompo con el aceite y vuelve a la
-// pista. p4 es muy lento: p1 y p2 le sacan una vuelta (LAPPED).
-// Ranking: p2, p1, p3, p4.
-func raceItemMaster(id string, start time.Time) Match {
+// raceWireToWire: p1 sale primero y lidera todas las vueltas, sin perder
+// nunca el primer lugar (WIRE_TO_WIRE). Detrás, p3 pasa a p2 en la vuelta 2,
+// pero en la 3 choca contra p4 y p2 recupera el segundo lugar.
+// Ranking: p1, p2, p3, p4.
+func raceWireToWire(id string, start time.Time) Match {
 	lapTimes := [][]int{
-		//  p1     p2     p3      p4
-		{81000, 80500, 82000, 125000},
-		{81000, 80500, 82000, 125000},
-		{81000, 80500, 87000, 125000}, // p3 pierde 5 s por el trompo
+		//  p1     p2     p3     p4
+		{80000, 81500, 81800, 83000}, // vuelta 1: p1, p2, p3, p4
+		{80200, 82500, 81000, 83200}, // vuelta 2: p1, p3, p2, p4
+		{80100, 81000, 85500, 82800}, // vuelta 3: p3 pierde tiempo por el choque
 	}
-	actions := []raceAction{
-		{driver: 1, lap: 1, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 1, "item": "boost"}},
-		{driver: 1, lap: 1, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 1, "item": "boost", "durationMs": 3000}},
-		{driver: 0, lap: 2, at: 0.1, action: "DRIFT", data: map[string]any{"lap": 2, "corner": 2, "durationMs": 2200}},
-		{driver: 1, lap: 2, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 2, "item": "shield"}},
-		{driver: 1, lap: 2, at: 0.35, action: "ITEM_USED", data: map[string]any{"lap": 2, "item": "shield"}},
-		{driver: 1, lap: 3, at: 0.2, action: "ITEM_PICKUP", data: map[string]any{"lap": 3, "item": "oil"}},
-		{driver: 1, lap: 3, at: 0.3, action: "ITEM_USED", data: map[string]any{"lap": 3, "item": "oil"}},
-		{driver: 2, lap: 3, at: 0.45, action: "SPIN", data: map[string]any{"lap": 3, "corner": 5}},
-		{driver: 2, lap: 3, at: 0.47, action: "RESPAWN"},
-	}
-	m := buildRace(id, start, racePlan{track: "jungle_ruins", lapTimes: lapTimes, actions: actions})
-	m.Script = "item master: p2 usa nitro, escudo y aceite; p4 recibe una vuelta (LAPPED)"
+	crashes := []raceCrash{{driver: 2, other: 3, lap: 3, at: crashAt, damage: 30, respawnDriver: true}}
+	m := buildRace(id, start, racePlan{track: "jungle_ruins", lapTimes: lapTimes, crashes: crashes})
+	m.Script = "de punta a punta: p1 lidera todas las vueltas sin perder el primer lugar"
 	return m
 }
 
-// racePauseDNF: en la vuelta 2, p3 (que iba primero) choca con p1, hace un
-// trompo y abandona (DNF). La carrera se pausa 30 s para limpiar la pista.
-// p2 adelanta a p1 y gana. p3 no aparece en el ranking: p2, p1, p4.
+// racePauseDNF: en la vuelta 2, p3 (que iba primero) choca con p1 y
+// abandona (DNF); p1, el chocado, vuelve a la pista (RESPAWN). La carrera se
+// pausa 30 s para limpiar la pista. p2 adelanta a p1 y gana. p3 no aparece
+// en el ranking: p2, p1, p4.
 func racePauseDNF(id string, start time.Time) Match {
 	lapTimes := [][]int{
 		//  p1     p2     p3     p4
@@ -126,12 +111,9 @@ func racePauseDNF(id string, start time.Time) Match {
 		{84000, 81000, 82000, 82500}, // p1 pierde tiempo por el golpe
 		{81000, 80800, 82000, 82500},
 	}
-	actions := []raceAction{
-		{driver: 2, lap: 2, at: 0.4, action: "COLLISION", data: map[string]any{"lap": 2, "otherId": "p1", "damage": 70}},
-		{driver: 2, lap: 2, at: 0.42, action: "SPIN", data: map[string]any{"lap": 2, "corner": 7}},
-	}
+	crashes := []raceCrash{{driver: 2, other: 0, lap: 2, at: 0.4, damage: 70, respawnOther: true}}
 	plan := racePlan{
-		track: "frozen_peak", lapTimes: lapTimes, actions: actions,
+		track: "frozen_peak", lapTimes: lapTimes, crashes: crashes,
 		dnf:   &raceDNF{driver: 2, lap: 2, reason: "crash"}, // abandona a los 130.0 s
 		pause: &racePause{atMs: 131000, seconds: 30, reason: "crash_cleanup"},
 	}
@@ -141,10 +123,11 @@ func racePauseDNF(id string, start time.Time) Match {
 }
 
 // ---------------------------------------------------------------------------
-// Football
+// Connect4
 //
-// Todos los partidos son 6 vs 6 con entretiempo (newFootballGame).
-// Equipo A: p1 (portero), p2 a p6. Equipo B: p7 (portero), p8 a p12.
+// c4Game lleva el tablero: las amenazas, los bloqueos y el 4 en línea salen
+// solos de las columnas que se juegan. Cada escenario solo dice en qué
+// columna suelta su ficha cada jugador, por turnos.
 
 // scripted le pone la descripción al partido terminado.
 func scripted(m Match, script string) Match {
@@ -152,161 +135,159 @@ func scripted(m Match, script string) Match {
 	return m
 }
 
-// footballComeback: B gana 1-0 y A remonta 2-1. Además:
-//   - tarjeta roja a p12 (minuto 30); después no vuelve a aparecer;
-//   - gol de p3 sin asistencia (minuto 55).
-func footballComeback(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(10, 0, "p8", "p9", true, 18.0)
-	g.goal(10, 15, "p9", "p8", false) // 0-1
-	g.pass(22, 0, "p2", "p3", false, 25.5)
-	g.interception(22, 3, "p10")
-	g.foul(30, 0, "p12", "p3", "red") // p12 expulsado
-	g.pass(41, 0, "p4", "p3", true, 12.0)
-	g.save(41, 20, "p3", false)    // ataja p7
-	g.goal(55, 0, "p3", "", false) // 1-1, sin asistencia
-	g.pass(70, 0, "p4", "p2", true, 20.0)
-	g.shot(70, 10, "p2", false, false)
-	g.corner(77, 0, "p5")
-	g.goal(78, 10, "p2", "p4", false) // 2-1
-	g.shot(85, 0, "p9", false, false)
-	return scripted(g.finish(92), "remontada: B gana 1-0 y A gana 2-1; roja a p12; gol de p3 sin asistencia")
+// c4Play suelta fichas en las columnas dadas, una por turno.
+func c4Play(g *c4Game, cols ...int) {
+	for _, col := range cols {
+		g.wait(3 * time.Second)
+		g.drop(col)
+	}
 }
 
-// footballDraw: empate 1-1. p4 y p10 juegan (pases, faltas, barridas) pero
-// no tiran al arco.
-func footballDraw(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(5, 0, "p4", "p3", true, 14.0)
-	g.pass(12, 0, "p3", "p2", true, 22.0)
-	g.goal(12, 10, "p2", "p3", false) // 1-0
-	g.foul(20, 0, "p4", "p8", "yellow")
-	g.dribble(28, 0, "p11", true)
-	g.pass(33, 0, "p10", "p8", true, 10.5)
-	g.shot(33, 15, "p8", false, false)
-	g.pass(50, 0, "p10", "p9", true, 19.0)
-	g.goal(50, 10, "p9", "p10", false) // 1-1
-	g.tackle(60, 0, "p4", "p9", true)
-	g.pass(66, 0, "p4", "p2", false, 30.0)
-	g.save(80, 0, "p2", false) // ataja p7
-	g.foul(88, 0, "p10", "p2", "none")
-	return scripted(g.finish(92), "empate 1-1; p4 y p10 no tiran al arco")
+// connect4Quick: p1 apila 4 fichas en la columna 4 y gana con solo 4 fichas
+// (quick win). En el medio arma una amenaza en (4,4) que p2 no tapa.
+func connect4Quick(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 4, 1, 4, 1, 4, 2, 4)
+	return scripted(g.finish(), "quick win: p1 gana con 4 fichas (vertical en la columna 4)")
 }
 
-// footballHatTrick: p4 mete 3 goles (uno de tiro potente) y A gana 3-1.
-func footballHatTrick(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(15, 0, "p2", "p4", true, 17.0)
-	g.goal(15, 10, "p4", "p2", false) // 1-0
-	g.shot(30, 0, "p4", false, false)
-	g.goal(44, 0, "p4", "", true) // 2-0, tiro potente
-	g.pass(60, 0, "p9", "p8", true, 21.0)
-	g.goal(60, 10, "p8", "p9", false) // 2-1
-	g.pass(80, 0, "p3", "p4", true, 15.0)
-	g.goal(80, 10, "p4", "p3", false) // 3-1, hat-trick
-	g.foul(86, 0, "p9", "p4", "yellow")
-	return scripted(g.finish(92), "hat-trick de p4; A gana 3-1")
+// connect4Double: p1 contra la IA (cpu), como el fixture connect4_vs_bot. p1
+// juega mal en la columna 1, la IA lo tapa y p1 deshace las dos fichas
+// (UNDO). Pide una pista y con la ficha en la columna 5 queda con 3 en
+// línea abierta por los dos lados: dos amenazas a la vez (double threat).
+// La IA solo puede tapar una y p1 gana por la otra.
+func connect4Double(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "cpu"}, map[string]string{"cpu": "medium"})
+	c4Play(g, 4, 4, 3, 3, 1, 2)
+	g.undo() // la ficha de la IA en (2,1)
+	g.undo() // la propia en (1,1)
+	g.hint()
+	c4Play(g, 5, 6, 2)
+	return scripted(g.finish(), "double threat: p1 deshace una mala jugada, arma dos amenazas a la vez y gana")
 }
 
-// footballCleanSheet: A gana 3-0 sin recibir goles (valla invicta). Los goles
-// son un autogol de p10 (B), un tiro potente de p5 y un gol de p3 con
-// asistencia de p2. p1 (portero de A) ataja 2 tiros y p12 (B) ve la roja.
-// Usa las 11 acciones de football.
-func footballCleanSheet(id string, start time.Time) Match {
-	g := newFootballGame(id, start)
-	g.pass(3, 0, "p2", "p3", true, 18.5)
-	g.dribble(3, 20, "p3", true)
-	g.save(4, 0, "p3", false) // ataja p7
-	g.corner(6, 0, "p5")
-	g.pass(8, 0, "p8", "p9", false, 25.5)
-	g.interception(8, 5, "p6")
-	g.save(10, 0, "p9", false) // ataja p1
-	g.ownGoal(12, 0, "p10")    // 1-0 (autogol de B)
-	g.foul(20, 0, "p11", "p2", "yellow")
-	g.tackle(25, 0, "p12", "p3", true)
-	g.goal(30, 0, "p5", "", true) // 2-0, tiro potente
-	g.dribble(55, 0, "p8", false)
-	g.tackle(55, 2, "p6", "p8", true)
-	g.foul(62, 0, "p12", "p6", "red") // p12 expulsado
-	g.shot(70, 0, "p9", true, false)
-	g.corner(75, 0, "p8")
-	g.save(75, 20, "p11", false) // ataja p1
-	g.pass(80, 0, "p2", "p3", true, 20.5)
-	g.goal(80, 15, "p3", "p2", false) // 3-0
-	g.shot(88, 0, "p9", false, false)
-	return scripted(g.finish(91), "valla invicta: A gana 3-0 con autogol de p10, tiro potente de p5 y 2 atajadas de p1")
+// connect4Defense: p1 arma dos amenazas, una horizontal en (1,1) y una
+// vertical en (3,4), y p2 tapa las dos (perfect defense). Después p1 pierde
+// un turno por tiempo, p2 arma una diagonal con amenaza en (4,3), p1 no la
+// ve y p2 gana.
+func connect4Defense(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 4, 4, 3, 5, 2, 1, 3, 6, 3, 3)
+	g.wait(30 * time.Second)
+	g.timeout() // a p1 se le acaba el tiempo
+	c4Play(g, 5, 7, 4)
+	return scripted(g.finish(), "perfect defense: p2 tapa las dos amenazas de p1 y gana")
+}
+
+// connect4Draw: dos humanos llenan el tablero (42 fichas) sin que nadie haga
+// 4 en línea: empate.
+func connect4Draw(id string, start time.Time) Match {
+	g := newC4Game(id, start, [2]string{"p1", "p2"}, nil)
+	c4Play(g, 2, 4, 2, 2, 2, 2, 2, 4, 6, 3, 4, 1, 5, 4, 3, 6, 6, 3, 7, 1, 7,
+		5, 1, 1, 1, 5, 3, 7, 4, 1, 6, 5, 3, 3, 5, 5, 7, 6, 6, 7, 7, 4)
+	return scripted(g.finish(), "empate: el tablero se llena sin 4 en línea")
 }
 
 // ---------------------------------------------------------------------------
 // Fighting
 //
 // Basados en los fixtures de Danny (fighting_match_ok y fighting_comeback).
-// fightGame lleva la vida de cada luchador: remainingHealth y health salen
-// solos del daño de cada golpe.
+// fightGame lleva la vida de cada luchador: remainingHealth sale solo del
+// daño de cada golpe.
 
 // fightFlawless: Scorpion (p1) contra Sub-Zero (p2), al mejor de 3. p1 gana el
 // round 1 sin recibir daño (flawless victory: vida 100) y el round 2 por KO
-// con vida 25, después de cortar un combo y usar su FATAL_BLOW. Termina con
-// una FATALITY. Usa las 10 acciones.
+// con vida 35. Con 2 rounds ganados, la pelea termina.
 func fightFlawless(id string, start time.Time) Match {
-	g := newFightGame(id, start, "the_pit", 3, fighters[0], fighters[1])
+	g := newFightGame(id, start, "the_pit", 3, "scorpion", "sub-zero")
 	// Round 1: p2 no acierta ni un golpe.
 	g.attack("p1", "punch", 10)
-	g.attack("p2", "uppercut", 0)
+	g.attack("p2", "kick", 0)
 	g.block("p1")
-	g.special("p1", "spear", 15)
 	g.combo("p1", 4, 30)
-	g.throw("p1", 15)
+	g.attack("p1", "kick", 30)
 	g.knockdown("p1")
-	g.attack("p1", "uppercut", 30) // p2 queda en 0
-	g.roundWon("p1", "ko")         // vida 100: flawless
-	// Round 2: p2 casi lo da vuelta, pero p1 corta el combo y usa su golpe fatal.
-	g.special("p2", "ice_ball", 10)
-	g.combo("p2", 5, 35)
-	g.comboBreaker("p1")
-	g.attack("p2", "kick", 30) // p1 queda con 25
-	g.fatalBlow("p1", 40)      // health 25
+	g.attack("p1", "kick", 30) // p2 queda en 0
+	g.roundWon("p1", "ko")     // vida 100: flawless
+	// Round 2: más parejo, pero gana p1.
+	g.combo("p2", 3, 35)
+	g.attack("p1", "kick", 40)
+	g.attack("p2", "punch", 30) // p1 queda con 35
 	g.combo("p1", 3, 25)
-	g.attack("p2", "punch", 0)
-	g.attack("p1", "uppercut", 35) // p2 queda en 0
+	g.attack("p1", "punch", 0)
+	g.block("p2")
+	g.attack("p1", "kick", 35) // p2 queda en 0
 	g.roundWon("p1", "ko")
-	g.fatality("p1")
-	return scripted(g.finish(), "flawless + fatality: p1 gana el round 1 sin recibir daño y remata con una fatality")
+	return scripted(g.finish(), "flawless: p1 gana el round 1 sin recibir daño y gana la pelea 2-0")
 }
 
 // fightComeback: Liu Kang (p1) contra Kitana (p2), al mejor de 3. p1 gana el
 // round 1 por tiempo; p2 gana los rounds 2 y 3 (remontada). Entre el 2 y el 3
-// hay una pausa. En el round 3 p2 queda con vida 25 y da vuelta la pelea con
-// su FATAL_BLOW. Sin fatality.
+// hay una pausa.
 func fightComeback(id string, start time.Time) Match {
-	g := newFightGame(id, start, "living_forest", 3, fighters[2], fighters[3])
+	g := newFightGame(id, start, "living_forest", 3, "liu_kang", "kitana")
 	// Round 1: se va a tiempo; p1 termina con 60 y p2 con 45.
 	g.attack("p1", "punch", 15)
 	g.attack("p2", "kick", 20)
 	g.combo("p1", 3, 30)
 	g.block("p2")
-	g.throw("p1", 10)
+	g.attack("p1", "kick", 10)
 	g.attack("p2", "punch", 20)
 	g.wait(70 * time.Second)
 	g.roundWon("p1", "timeout")
 	// Round 2: p2 gana por KO con vida 90.
-	g.combo("p2", 5, 45)
+	g.combo("p2", 4, 45)
 	g.attack("p1", "kick", 0)
 	g.attack("p1", "punch", 10)
-	g.special("p2", "fan_toss", 25)
+	g.attack("p2", "kick", 25)
 	g.knockdown("p2")
-	g.attack("p2", "uppercut", 30) // p1 queda en 0
+	g.attack("p2", "kick", 30) // p1 queda en 0
 	g.roundWon("p2", "ko")
 	g.pause("player_pause", 20*time.Second)
-	// Round 3: p1 deja a p2 con 25 y p2 lo da vuelta con su golpe fatal.
+	// Round 3: p1 deja a p2 con 25, pero p2 lo da vuelta con dos combos.
 	g.combo("p1", 4, 40)
 	g.attack("p1", "punch", 15)
-	g.special("p1", "dragon_fire", 20) // p2 queda con 25
-	g.fatalBlow("p2", 50)              // health 25
+	g.attack("p1", "kick", 20) // p2 queda con 25
+	g.combo("p2", 4, 50)
 	g.combo("p2", 3, 30)
-	g.attack("p2", "uppercut", 20) // p1 queda en 0
+	g.attack("p2", "punch", 20) // p1 queda en 0
 	g.roundWon("p2", "ko")
 	return scripted(g.finish(), "remontada: p1 gana el round 1 y p2 gana los rounds 2 y 3")
+}
+
+// fightCombo: Raiden (p1) contra Sonya (p2), al mejor de 3. El round 1 termina
+// en doble KO (ROUND_DRAW): no suma para nadie. En el round 2 p1 conecta un
+// combo de 6 golpes (combo master) y gana; en el 3 vuelve a ganar y se lleva
+// la pelea. Usa las 6 acciones.
+func fightCombo(id string, start time.Time) Match {
+	g := newFightGame(id, start, "dead_pool", 3, "raiden", "sonya")
+	// Round 1: los dos quedan en 0 a la vez.
+	g.attack("p1", "kick", 20)
+	g.combo("p2", 4, 40)
+	g.combo("p1", 3, 35)
+	g.attack("p2", "kick", 30)
+	g.attack("p1", "kick", 25)  // p2 queda con 20
+	g.attack("p2", "punch", 15) // p1 queda con 15
+	g.attack("p1", "punch", 20) // p2 queda en 0...
+	g.attack("p2", "kick", 15)  // ...y p1 también: doble KO
+	g.roundDraw("p1", "double_ko")
+	// Round 2: el combo de 6 golpes.
+	g.combo("p1", 6, 50)
+	g.attack("p2", "punch", 0)
+	g.block("p1")
+	g.combo("p2", 3, 30)
+	g.attack("p1", "kick", 30)
+	g.knockdown("p1")
+	g.attack("p1", "punch", 20) // p2 queda en 0
+	g.roundWon("p1", "ko")
+	// Round 3: p1 gana y se lleva la pelea 2-0 (con un empate).
+	g.attack("p2", "kick", 25)
+	g.combo("p1", 4, 40)
+	g.attack("p1", "kick", 30)
+	g.attack("p2", "punch", 20)
+	g.attack("p1", "kick", 30) // p2 queda en 0
+	g.roundWon("p1", "ko")
+	return scripted(g.finish(), "combo master: doble KO en el round 1 y un combo de 6 golpes de p1, que gana 2-0")
 }
 
 // ---------------------------------------------------------------------------

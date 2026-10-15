@@ -2,7 +2,6 @@ package simulator
 
 import (
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -24,8 +23,8 @@ func scriptedFor(t *testing.T, gameID string) map[string]Match {
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
 	ms := Generate(42, Counts{})
-	if len(ms) != 13 {
-		t.Fatalf("escenarios = %d, se esperaban 13", len(ms))
+	if len(ms) != 14 {
+		t.Fatalf("escenarios = %d, se esperaban 14", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -33,8 +32,8 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1, Tetris: 1})); got != 13+2+3+1+1 {
-		t.Fatalf("partidas = %d, se esperaban 20", got)
+	if got := len(Generate(42, Counts{Racing: 2, Connect4: 3, Fighting: 1, Tetris: 1})); got != 14+2+3+1+1 {
+		t.Fatalf("partidas = %d, se esperaban 21", got)
 	}
 }
 
@@ -129,170 +128,92 @@ func TestScriptedRacing(t *testing.T) {
 		t.Fatalf("clean: ganador=%v choques=%d penalizaciones=%d", winner, collisions, penalties)
 	}
 
-	// Item master: p2 usa los 3 objetos y gana; alguien le saca una vuelta a p4.
-	items := racing["items"]
-	usedBy := map[string]map[any]bool{}
-	lappedP4 := false
-	for _, e := range items.Events {
-		switch e.Action {
-		case "ITEM_USED":
-			if usedBy[e.PlayerID] == nil {
-				usedBy[e.PlayerID] = map[any]bool{}
-			}
-			usedBy[e.PlayerID][data(t, e)["item"]] = true
-		case "LAPPED":
-			lappedP4 = lappedP4 || data(t, e)["lappedId"] == "p4"
+	// De punta a punta: el ganador (p1) nunca cambia de posición y termina
+	// cada vuelta primero.
+	wire := racing["wire"]
+	if got := finalRanking(t, wire); got[0] != "p1" {
+		t.Fatalf("wire: ranking = %v", got)
+	}
+	for lap := 1; lap <= 3; lap++ {
+		if pos := lapPositions(t, wire, lap); pos["p1"] != 1 {
+			t.Fatalf("wire: p1 en la vuelta %d = %d", lap, pos["p1"])
 		}
 	}
-	if got := finalRanking(t, items); len(usedBy["p2"]) != 3 || !lappedP4 || !reflect.DeepEqual(got, []any{"p2", "p1", "p3", "p4"}) {
-		t.Fatalf("items: objetos de p2=%v, p4 doblado=%v, ranking=%v", usedBy["p2"], lappedP4, got)
+	for _, e := range wire.Events {
+		if e.Action == "POSITION_CHANGED" && e.PlayerID == "p1" {
+			t.Fatalf("wire: p1 cambió de posición en %s", e.EventID)
+		}
 	}
 
-	// Pausa y abandono: hay pausa, p3 abandona y no está en el ranking.
+	// Pausa y abandono: hay pausa, p3 abandona y no está en el ranking, y p1
+	// (el chocado) vuelve a la pista.
 	dnf := racing["dnf"]
-	hasPause, dnfBy := false, ""
+	hasPause, dnfBy, respawnBy := false, "", ""
 	for _, e := range dnf.Events {
-		if e.Type == "MATCH_PAUSED" {
+		switch {
+		case e.Type == "MATCH_PAUSED":
 			hasPause = true
-		}
-		if e.Action == "DNF" {
+		case e.Action == "DNF":
 			dnfBy = e.PlayerID
+		case e.Action == "RESPAWN":
+			respawnBy = e.PlayerID
 		}
 	}
-	if got := finalRanking(t, dnf); !hasPause || dnfBy != "p3" || !reflect.DeepEqual(got, []any{"p2", "p1", "p4"}) {
-		t.Fatalf("dnf: pausa=%v DNF de %q ranking=%v", hasPause, dnfBy, got)
+	if got := finalRanking(t, dnf); !hasPause || dnfBy != "p3" || respawnBy != "p1" || !reflect.DeepEqual(got, []any{"p2", "p1", "p4"}) {
+		t.Fatalf("dnf: pausa=%v DNF de %q RESPAWN de %q ranking=%v", hasPause, dnfBy, respawnBy, got)
 	}
 }
 
-// footballSummary resume un partido: el marcador después de cada gol, goles
-// por jugador, tiros por jugador, atajadas, autogoles, rojas, goles sin
-// asistencia y goles de tiro potente.
-type footballSummary struct {
-	scoreTimeline []string // ej. ["0-1", "1-1", "2-1"] (A-B)
-	goals         map[string]int
-	shots         map[string]int
-	saves         map[string]int
-	ownGoals      int
-	reds          []string
-	unassisted    int
-	powerGoals    int
-}
+func TestScriptedConnect4(t *testing.T) {
+	c4 := scriptedFor(t, "connect4")
 
-func summarize(t *testing.T, m Match) footballSummary {
-	t.Helper()
-	s := footballSummary{goals: map[string]int{}, shots: map[string]int{}, saves: map[string]int{}}
-	score := map[string]int{}
-	lastShot := map[string]string{} // jugador -> acción de su último tiro
-	addGoal := func(team string) {
-		score[team]++
-		s.scoreTimeline = append(s.scoreTimeline, strconv.Itoa(score["A"])+"-"+strconv.Itoa(score["B"]))
-	}
-	for _, e := range m.Events {
-		if e.Type != "PLAYER_ACTION" {
-			continue
-		}
-		d := data(t, e)
-		switch e.Action {
-		case "SHOT", "POWER_SHOT":
-			s.shots[e.PlayerID]++
-			lastShot[e.PlayerID] = e.Action
-		case "GOAL":
-			addGoal(d["teamId"].(string))
-			s.goals[e.PlayerID]++
-			if _, ok := d["assistId"]; !ok {
-				s.unassisted++
-			}
-			if lastShot[e.PlayerID] == "POWER_SHOT" {
-				s.powerGoals++
-			}
-		case "OWN_GOAL": // suma para el otro equipo
-			s.ownGoals++
-			if d["teamId"] == "A" {
-				addGoal("B")
-			} else {
-				addGoal("A")
-			}
-		case "SAVE":
-			s.saves[e.PlayerID]++
-		case "FOUL":
-			if d["card"] == "red" {
-				s.reds = append(s.reds, e.PlayerID)
-			}
-		}
-	}
-	return s
-}
-
-func TestScriptedFootball(t *testing.T) {
-	football := scriptedFor(t, "football")
-
-	cb := summarize(t, football["comeback"])
-	if !reflect.DeepEqual(cb.scoreTimeline, []string{"0-1", "1-1", "2-1"}) {
-		t.Errorf("comeback: marcador %v, se esperaba B adelante y A ganando 2-1", cb.scoreTimeline)
-	}
-	if !reflect.DeepEqual(cb.reds, []string{"p12"}) {
-		t.Errorf("comeback: rojas %v, se esperaba [p12]", cb.reds)
-	}
-	if cb.unassisted != 1 {
-		t.Errorf("comeback: goles sin asistencia = %d, se esperaba 1", cb.unassisted)
+	// Quick win: p1 gana con 4 fichas.
+	if q := checkConnect4(t, c4["quick"]); q.winner != "p1" || q.discs["p1"] > 7 {
+		t.Errorf("quick: ganador %q con %d fichas", q.winner, q.discs["p1"])
 	}
 
-	draw := summarize(t, football["draw"])
-	if final := draw.scoreTimeline[len(draw.scoreTimeline)-1]; final != "1-1" {
-		t.Errorf("draw: marcador final %s, se esperaba 1-1", final)
-	}
-	for _, p := range []string{"p4", "p10"} {
-		if draw.shots[p] != 0 {
-			t.Errorf("draw: %s tiene %d tiros, se esperaban 0", p, draw.shots[p])
-		}
+	// Double threat: p1 tiene 2 amenazas abiertas a la vez y gana; antes
+	// deshace dos fichas y pide una pista.
+	if d := checkConnect4(t, c4["double"]); d.winner != "p1" || d.maxOpen["p1"] < 2 || d.undos != 2 || d.hints != 1 {
+		t.Errorf("double: %+v", d)
 	}
 
-	ht := summarize(t, football["hattrick"])
-	if ht.goals["p4"] != 3 {
-		t.Errorf("hattrick: p4 tiene %d goles, se esperaban 3", ht.goals["p4"])
-	}
-	if final := ht.scoreTimeline[len(ht.scoreTimeline)-1]; final != "3-1" {
-		t.Errorf("hattrick: marcador final %s, se esperaba 3-1", final)
+	// Perfect defense: p1 arma 2 o más amenazas y p2 las tapa todas.
+	if d := checkConnect4(t, c4["defense"]); d.created["p1"] < 2 || d.blocked["p2"] < d.created["p1"] || d.timeouts != 1 {
+		t.Errorf("defense: %+v", d)
 	}
 
-	// Valla invicta: A gana 3-0 con un autogol, un gol de tiro potente y 2
-	// atajadas de su portero; además usa las 11 acciones.
-	cs := summarize(t, football["cleansheet"])
-	if final := cs.scoreTimeline[len(cs.scoreTimeline)-1]; final != "3-0" {
-		t.Errorf("cleansheet: marcador final %s, se esperaba 3-0", final)
+	// Empate: tablero lleno sin ganador.
+	if d := checkConnect4(t, c4["draw"]); d.winner != "" || d.discs["p1"]+d.discs["p2"] != 42 {
+		t.Errorf("draw: %+v", d)
 	}
-	if cs.ownGoals != 1 || cs.powerGoals != 1 || cs.saves["p1"] != 2 {
-		t.Errorf("cleansheet: autogoles=%d goles potentes=%d atajadas de p1=%d", cs.ownGoals, cs.powerGoals, cs.saves["p1"])
-	}
+
+	// Entre los escenarios se usan las 7 acciones.
 	used := map[string]bool{}
-	for _, e := range football["cleansheet"].Events {
-		used[e.Action] = true
-	}
-	for action := range validation.GameActions["football"] {
-		if !used[action] {
-			t.Errorf("cleansheet: no usa %s", action)
-		}
-	}
-
-	// Todos los partidos tienen el entretiempo como pausa.
-	for name, m := range football {
-		paused := false
+	for _, m := range c4 {
 		for _, e := range m.Events {
-			paused = paused || (e.Type == "MATCH_PAUSED" && string(e.Data) == `{"reason":"half_time"}`)
+			used[e.Action] = true
 		}
-		if !paused {
-			t.Errorf("%s: sin entretiempo", name)
+	}
+	for action := range validation.GameActions["connect4"] {
+		if !used[action] {
+			t.Errorf("ningún escenario de connect4 usa %s", action)
 		}
 	}
 }
 
-// roundResults devuelve, en orden, el ganador y la vida restante de cada round.
+// roundResults devuelve, en orden, el resultado de cada round: el ganador
+// (o "empate") y la vida que le quedó al ganador (0 en un empate).
 func roundResults(t *testing.T, m Match) (winners []string, health []int) {
 	t.Helper()
 	for _, e := range m.Events {
-		if e.Action == "ROUND_WON" {
+		switch e.Action {
+		case "ROUND_WON":
 			winners = append(winners, e.PlayerID)
 			health = append(health, int(data(t, e)["remainingHealth"].(float64)))
+		case "ROUND_DRAW":
+			winners = append(winners, "empate")
+			health = append(health, 0)
 		}
 	}
 	return winners, health
@@ -301,43 +222,52 @@ func roundResults(t *testing.T, m Match) (winners []string, health []int) {
 func TestScriptedFighting(t *testing.T) {
 	fighting := scriptedFor(t, "fighting")
 
-	// Flawless + fatality: p1 gana 2-0, el round 1 con vida 100 y el 2 con 25,
-	// y la última acción es su FATALITY. Usa las 10 acciones.
-	fl := fighting["flawless"]
-	winners, health := roundResults(t, fl)
-	if !reflect.DeepEqual(winners, []string{"p1", "p1"}) || !reflect.DeepEqual(health, []int{100, 25}) {
-		t.Errorf("flawless: ganadores %v con vida %v", winners, health)
-	}
-	last := fl.Events[len(fl.Events)-2] // el último es MATCH_FINISHED
-	if last.Action != "FATALITY" || last.PlayerID != "p1" {
-		t.Errorf("flawless: la última acción es %s de %s", last.Action, last.PlayerID)
-	}
-	used := map[string]bool{}
-	for _, e := range fl.Events {
-		used[e.Action] = true
-	}
-	for action := range validation.GameActions["fighting"] {
-		if !used[action] {
-			t.Errorf("flawless: no usa %s", action)
-		}
+	// Flawless: p1 gana 2-0, el round 1 con vida 100 y el 2 con 35.
+	winners, health := roundResults(t, fighting["flawless"])
+	if !reflect.DeepEqual(winners, []string{"p1", "p1"}) || !reflect.DeepEqual(health, []int{100, 35}) {
+		t.Errorf("flawless: rounds %v con vida %v", winners, health)
 	}
 
 	// Remontada: p1 gana el round 1 por tiempo y p2 los rounds 2 y 3; hay una
-	// pausa y no hay fatality.
+	// pausa.
 	cb := fighting["comeback"]
 	winners, health = roundResults(t, cb)
 	if !reflect.DeepEqual(winners, []string{"p1", "p2", "p2"}) || !reflect.DeepEqual(health, []int{60, 90, 25}) {
-		t.Errorf("comeback: ganadores %v con vida %v", winners, health)
+		t.Errorf("comeback: rounds %v con vida %v", winners, health)
 	}
 	paused := false
 	for _, e := range cb.Events {
 		paused = paused || e.Type == "MATCH_PAUSED"
-		if e.Action == "FATALITY" {
-			t.Errorf("comeback: no debería tener fatality")
-		}
 	}
 	if !paused {
 		t.Errorf("comeback: sin pausa")
+	}
+
+	// Combo master: round 1 empatado por doble KO, un combo de 6 golpes y p1
+	// gana 2-0. Usa las 6 acciones de fighting.
+	co := fighting["combo"]
+	winners, _ = roundResults(t, co)
+	if !reflect.DeepEqual(winners, []string{"empate", "p1", "p1"}) {
+		t.Errorf("combo: rounds %v", winners)
+	}
+	maxHits := 0.0
+	used := map[string]bool{}
+	for _, e := range co.Events {
+		used[e.Action] = true
+		if e.Action == "COMBO" {
+			maxHits = max(maxHits, data(t, e)["hits"].(float64))
+		}
+		if e.Action == "ROUND_DRAW" && data(t, e)["method"] != "double_ko" {
+			t.Errorf("combo: empate por %v", data(t, e)["method"])
+		}
+	}
+	if maxHits < 5 {
+		t.Errorf("combo: el combo más largo tiene %v golpes", maxHits)
+	}
+	for action := range validation.GameActions["fighting"] {
+		if !used[action] {
+			t.Errorf("combo: no usa %s", action)
+		}
 	}
 }
 

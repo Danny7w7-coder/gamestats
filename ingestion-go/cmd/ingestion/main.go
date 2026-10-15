@@ -32,6 +32,14 @@ func main() {
 	}
 	defer rejectedLog.Close()
 
+	// Mismo formato JSON Lines que los rechazados, en otro archivo: eventos
+	// ACEPTADOS cuya acción no está en el catálogo (avisos, no errores).
+	unknownLog, err := rejected.New("logs/unknown/unknown_actions.jsonl")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer unknownLog.Close()
+
 	store := state.NewMatchStore()
 	dispatcher := pipeline.New(store, cfg.IdleTimeout)
 
@@ -44,7 +52,7 @@ func main() {
 		pipeline.RunSenders(cfg.Workers, dispatcher.Out(), client.New(cfg.ScalaURL), store)
 	}()
 
-	h := &api.Handler{Rejected: rejectedLog, Store: store, Pipeline: dispatcher}
+	h := &api.Handler{Rejected: rejectedLog, Unknown: unknownLog, Store: store, Pipeline: dispatcher}
 
 	mux := http.NewServeMux()
 	// Desde Go 1.22 el patrón puede incluir el método: otro método recibe 405.

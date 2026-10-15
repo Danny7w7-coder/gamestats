@@ -112,92 +112,46 @@ object Codecs:
       case "LAPPED" =>
         ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "lappedId")
             yield Lapped(lap, other))
-      case "ITEM_PICKUP" =>
-        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
-            yield ItemPickup(lap, item))
-      case "ITEM_USED" =>
-        ctx(for lap <- intMin(f, "lap", 1); item <- oneOf(f, "item", Item.values.map(i => i.key -> i).toMap)
-                ms  <- optionalField(f, "durationMs")(_ => longMin(f, "durationMs", 1))
-                _   <- check(item != Item.Boost || ms.isDefined, "el boost necesita 'durationMs'")
-            yield ItemUsed(lap, item, ms))
-      case "DRIFT" =>
-        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1); ms <- longMin(f, "durationMs", 1)
-            yield Drift(lap, corner, ms))
       case "COLLISION" =>
         ctx(for lap <- intMin(f, "lap", 1); other <- nonEmptyStr(f, "otherId"); dmg <- intIn(f, "damage", 0, 100)
             yield Collision(lap, other, dmg))
-      case "SPIN" =>
-        ctx(for lap <- intMin(f, "lap", 1); corner <- intMin(f, "corner", 1)
-            yield Spin(lap, corner))
       case "RESPAWN" =>
         ctx(for lap <- intMin(f, "lap", 1); pos <- intMin(f, "position", 1)
             yield Respawn(lap, pos))
       case "DNF" =>
         ctx(for lap <- intMin(f, "lap", 1); reason <- oneOf(f, "reason", DnfReason.values.map(r => r.key -> r).toMap)
             yield Dnf(lap, reason))
-      // Football (minute: 0..130 en todas las acciones)
-      case "PASS" =>
-        ctx(for team <- str(f, "teamId"); target <- str(f, "targetId"); ok <- bool(f, "success")
-                dist <- double(f, "distance").filterOrElse(_ >= 0, "'distance' debe ser ≥ 0"); min <- minute(f)
-            yield Pass(team, target, ok, dist, min))
-      case "SHOT" =>
-        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
-            yield Shot(team, onTarget, min))
-      case "POWER_SHOT" =>
-        ctx(for team <- str(f, "teamId"); onTarget <- bool(f, "onTarget"); min <- minute(f)
-            yield PowerShot(team, onTarget, min))
-      case "GOAL" =>
-        ctx(for team <- str(f, "teamId"); assist <- optStr(f, "assistId"); min <- minute(f)
-            yield Goal(team, assist, min))
-      case "OWN_GOAL" =>
-        ctx(for team <- str(f, "teamId"); min <- minute(f) yield OwnGoal(team, min))
-      case "FOUL" =>
-        ctx(for team <- str(f, "teamId"); card <- str(f, "card").flatMap(parseCard)
-                min <- minute(f); target <- optStr(f, "targetId")
-            yield Foul(team, card, min, target))
-      case "SAVE" =>
-        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Save(team, min))
-      case "TACKLE" =>
-        ctx(for team <- str(f, "teamId"); target <- nonEmptyStr(f, "targetId"); ok <- bool(f, "success"); min <- minute(f)
-            yield Tackle(team, target, ok, min))
-      case "INTERCEPTION" =>
-        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Interception(team, min))
-      case "DRIBBLE" =>
-        ctx(for team <- str(f, "teamId"); ok <- bool(f, "success"); min <- minute(f) yield Dribble(team, ok, min))
-      case "CORNER" =>
-        ctx(for team <- str(f, "teamId"); min <- minute(f) yield Corner(team, min))
       // Fighting (round: 1..5; damage: 0..100, y 0 si el golpe falla)
       case "ATTACK" =>
         ctx(for target <- nonEmptyStr(f, "targetId"); move <- oneOf(f, "move", Move.values.map(m => m.key -> m).toMap)
                 hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
             yield Attack(target, move, hit, dmg, r))
-      case "SPECIAL_MOVE" =>
-        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name")
-                hit <- bool(f, "hit"); dmg <- strike(f, hit); r <- round(f)
-            yield SpecialMove(target, name, hit, dmg, r))
       case "COMBO" =>
         ctx(for target <- nonEmptyStr(f, "targetId"); hits <- intMin(f, "hits", 2)
                 dmg <- intIn(f, "damage", 1, 100); r <- round(f)
             yield Combo(target, hits, dmg, r))
-      case "THROW" =>
-        ctx(for target <- nonEmptyStr(f, "targetId"); dmg <- intIn(f, "damage", 1, 100); r <- round(f)
-            yield Throw(target, dmg, r))
       case "BLOCK" =>
         ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield Block(attacker, r))
-      case "COMBO_BREAKER" =>
-        ctx(for attacker <- nonEmptyStr(f, "attackerId"); r <- round(f) yield ComboBreaker(attacker, r))
       case "KNOCKDOWN" =>
         ctx(for target <- nonEmptyStr(f, "targetId"); r <- round(f) yield Knockdown(target, r))
-      case "FATAL_BLOW" =>
-        ctx(for target <- nonEmptyStr(f, "targetId"); hit <- bool(f, "hit"); dmg <- strike(f, hit)
-                health <- intIn(f, "health", 1, 30); r <- round(f)
-            yield FatalBlow(target, hit, dmg, health, r))
       case "ROUND_WON" =>
         ctx(for r <- round(f); health <- intIn(f, "remainingHealth", 1, 100)
                 method <- oneOf(f, "method", WinMethod.values.map(m => m.key -> m).toMap)
             yield RoundWon(r, health, method))
-      case "FATALITY" =>
-        ctx(for target <- nonEmptyStr(f, "targetId"); name <- nonEmptyStr(f, "name") yield Fatality(target, name))
+      case "ROUND_DRAW" =>
+        ctx(for r <- round(f); method <- oneOf(f, "method", DrawMethod.values.map(m => m.key -> m).toMap)
+                other <- nonEmptyStr(f, "otherId")
+            yield RoundDraw(r, method, other))
+      // Connect4 (column: 1..7; row: 1..6)
+      case "DISC_DROPPED"   => ctx(for c <- column(f); r <- row(f) yield DiscDropped(c, r))
+      case "THREAT_CREATED" => ctx(for c <- column(f); r <- row(f) yield ThreatCreated(c, r))
+      case "THREAT_BLOCKED" =>
+        ctx(for c <- column(f); r <- row(f); attacker <- nonEmptyStr(f, "attackerId") yield ThreatBlocked(c, r, attacker))
+      case "CONNECT_FOUR" =>
+        ctx(oneOf(f, "direction", Line.values.map(l => l.key -> l).toMap).map(ConnectFour(_)))
+      case "TURN_TIMEOUT" => ctx(intMin(f, "seconds", 1).map(TurnTimeout(_)))
+      case "UNDO"         => ctx(for c <- column(f); r <- row(f) yield Undo(c, r))
+      case "HINT_USED"    => ctx(column(f).map(HintUsed(_)))
       // Tetris
       case "PIECE_SPAWNED" => ctx(piece(f, "piece").map(PieceSpawned(_)))
       case "PIECE_MOVED" =>
@@ -235,22 +189,16 @@ object Codecs:
   // ---------------------------------------------------------------------------
 
   def encode(a: MatchAnalysis): ujson.Value =
-    // Los campos opcionales de football solo se escriben si existen:
-    // `lista ++ option` agrega el par si es Some y nada si es None.
-    val base = List(
-      "matchId"     -> ujson.Str(a.matchId),
-      "gameId"      -> ujson.Str(a.gameId),
-      "matchStats"  -> encodeMatchStats(a.matchStats)
-    )
-    val teams = a.teamStats.map(ts => "teamStats" -> ujson.Arr.from(ts.map(t => entity("teamId", t.teamId, t.metrics))))
-    val rest = List(
-      "playerStats" -> ujson.Arr.from(a.playerStats.map(p => entity("playerId", p.playerId, p.metrics))),
+    ujson.Obj(
+      "matchId"     -> a.matchId,
+      "gameId"      -> a.gameId,
+      "matchStats"  -> encodeMatchStats(a.matchStats),
+      "playerStats" -> ujson.Arr.from(a.playerStats.map(p => ujson.Obj("playerId" -> p.playerId, "metrics" -> encodeMetrics(p.metrics)))),
       "patterns"    -> ujson.Arr.from(a.patterns.map(encodePattern))
     )
-    ujson.Obj.from(base ++ teams ++ rest)
 
   private def encodeMatchStats(m: MatchStats): ujson.Value =
-    val fields = List(
+    ujson.Obj(
       "durationSeconds" -> ujson.Num(m.durationSeconds.toDouble),
       "totalEvents"     -> ujson.Num(m.totalEvents),
       "playerCount"     -> ujson.Num(m.playerCount),
@@ -258,7 +206,6 @@ object Codecs:
       // winner siempre se escribe; None -> null (empate o sin datos).
       "winner"          -> m.winner.fold[ujson.Value](ujson.Null)(ujson.Str(_))
     )
-    ujson.Obj.from(fields ++ m.score.map(s => "score" -> sortedObj(s)(n => ujson.Num(n))))
 
   def encodePattern(p: Pattern): ujson.Value =
     ujson.Obj(
@@ -269,9 +216,6 @@ object Codecs:
 
   def encodeMetrics(metrics: Map[String, Double]): ujson.Value =
     sortedObj(metrics)(ujson.Num(_))
-
-  private def entity(idKey: String, id: String, metrics: Map[String, Double]): ujson.Value =
-    ujson.Obj(idKey -> id, "metrics" -> encodeMetrics(metrics))
 
   /** Map -> objeto JSON con las claves ordenadas, para que la salida sea estable. */
   private def sortedObj[A](m: Map[String, A])(f: A => ujson.Value): ujson.Value =
@@ -287,10 +231,9 @@ object Codecs:
       matchId     <- nonEmptyStr(f, "matchId")
       gameId      <- nonEmptyStr(f, "gameId")
       matchStats  <- get(f, "matchStats").flatMap(decodeMatchStats).left.map(msg => s"matchStats: $msg")
-      teamStats   <- optionalField(f, "teamStats")(v => decodeList(v, "teamStats")(decodeEntity("teamId", TeamStats(_, _))))
-      playerStats <- get(f, "playerStats").flatMap(decodeList(_, "playerStats")(decodeEntity("playerId", PlayerStats(_, _))))
+      playerStats <- get(f, "playerStats").flatMap(decodeList(_, "playerStats")(decodePlayerStats))
       patterns    <- get(f, "patterns").flatMap(decodeList(_, "patterns")(decodePattern))
-    yield MatchAnalysis(matchId, gameId, matchStats, teamStats, playerStats, patterns)
+    yield MatchAnalysis(matchId, gameId, matchStats, playerStats, patterns)
 
   private def decodeMatchStats(json: ujson.Value): Result[MatchStats] =
     for
@@ -300,15 +243,14 @@ object Codecs:
       players    <- int(f, "playerCount")
       byAction   <- get(f, "eventsByAction").flatMap(asObject(_, "'eventsByAction'")).flatMap(intValues)
       winner     <- optStr(f, "winner")
-      score      <- optionalField(f, "score")(v => asObject(v, "'score'").flatMap(intValues))
-    yield MatchStats(duration, total, players, byAction, winner, score)
+    yield MatchStats(duration, total, players, byAction, winner)
 
-  private def decodeEntity[A](idKey: String, build: (String, Map[String, Double]) => A)(json: ujson.Value): Result[A] =
+  private def decodePlayerStats(json: ujson.Value): Result[PlayerStats] =
     for
-      f       <- asObject(json, s"cada elemento con '$idKey'")
-      id      <- nonEmptyStr(f, idKey)
+      f       <- asObject(json, "cada elemento de 'playerStats'")
+      id      <- nonEmptyStr(f, "playerId")
       metrics <- get(f, "metrics").flatMap(asObject(_, "'metrics'")).flatMap(doubleValues)
-    yield build(id, metrics)
+    yield PlayerStats(id, metrics)
 
   private def decodePattern(json: ujson.Value): Result[Pattern] =
     for
@@ -320,12 +262,6 @@ object Codecs:
 
   private def decodeList[A](json: ujson.Value, what: String)(decode: ujson.Value => Result[A]): Result[List[A]] =
     json.arrOpt.toRight(s"'$what' debe ser un arreglo").flatMap(items => sequence(items.toList.map(decode)))
-
-  /** Campo opcional de cualquier tipo: ausente o null -> None. */
-  private def optionalField[A](f: Fields, key: String)(decode: ujson.Value => Result[A]): Result[Option[A]] =
-    f.get(key).filterNot(_.isNull) match
-      case None    => Right(None)
-      case Some(v) => decode(v).map(Some(_))
 
   private def doubleValues(f: Fields): Result[Map[String, Double]] =
     sequence(f.toList.map((k, v) => v.numOpt.map(k -> _).toRight(s"'$k' debe ser número"))).map(_.toMap)
@@ -350,12 +286,6 @@ object Codecs:
     case "PLAYER_RECONNECTED"  => Right(EventType.PlayerReconnected)
     case "PLAYER_ACTION"       => Right(EventType.PlayerAction)
     case other                 => Left(s"'type' desconocido: '$other'")
-
-  private def parseCard(s: String): Result[Card] = s match
-    case "none"   => Right(Card.None)
-    case "yellow" => Right(Card.Yellow)
-    case "red"    => Right(Card.Red)
-    case other    => Left(s"'card' debe ser none|yellow|red, llegó '$other'")
 
   /** Solo PLAYER_ACTION lleva acción; en los demás tipos se ignora. */
   private def parseActionField(eventType: EventType, f: Fields, data: ujson.Value): Result[Option[GameAction]] =
@@ -416,8 +346,9 @@ object Codecs:
   private def longMin(f: Fields, key: String, min: Long): Result[Long] =
     long(f, key).filterOrElse(_ >= min, s"'$key' debe ser ≥ $min")
 
-  /** Minuto de football: informativo, pero dentro del rango del schema. */
-  private def minute(f: Fields): Result[Int] = intIn(f, "minute", 0, 130)
+  /** Casilla de connect4: columna 1..7 y fila 1..6 (la gravedad la revisa Connect4Check). */
+  private def column(f: Fields): Result[Int] = intIn(f, "column", 1, 7)
+  private def row(f: Fields): Result[Int]    = intIn(f, "row", 1, 6)
 
   /** Round de fighting (1 a 5; contra el máximo de la pelea lo revisa FightingCheck). */
   private def round(f: Fields): Result[Int] = intIn(f, "round", 1, 5)

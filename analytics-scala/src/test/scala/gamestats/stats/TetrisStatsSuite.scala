@@ -74,4 +74,4 @@ class TetrisStatsSuite extends munit.FunSuite:
     assertEquals(Codecs.parseAction("TOP_OUT", ujson.Obj()), Right(TopOut))
 
   test("el registry tiene los 4 juegos"):
-    assertEquals(Analyzer.registry.keySet, Set("racing", "football", "fighting", "tetris"))
+    assertEquals(Analyzer.registry.keySet, Set("racing", "fighting", "connect4", "tetris"))

@@ -36,7 +36,7 @@ class RacingStatsSuite extends munit.FunSuite:
     val p9 = metricsOf(RacingAnalyzer.analyze(withGhost), "p9")
     assertEquals(p9.values.toSet, Set(0.0))
     assertEquals(p9.keySet, Set("bestLapMs", "avgLapMs", "consistency", "penaltySeconds", "effectiveTimeMs",
-      "overtakes", "itemsPicked", "itemsUsed", "boostsUsed", "collisions"))
+      "overtakes", "collisions", "lapsLed"))
 
   test("sin MATCH_FINISHED no hay ganador"):
     val unfinished = batch.copy(events = batch.events.filterNot(_.eventType == EventType.MatchFinished))
@@ -47,9 +47,7 @@ class RacingStatsSuite extends munit.FunSuite:
     assertEquals(RacingAnalyzer.avgLapMs(events), RacingAnalyzer.average(RacingAnalyzer.lapTimes(events)))
     assertEquals(RacingAnalyzer.average(Nil), 0.0)
 
-  test("racing no tiene score ni teamStats y mantiene las estadísticas genéricas"):
-    assertEquals(analysis.matchStats.score, None)
-    assertEquals(analysis.teamStats, None)
+  test("racing mantiene las estadísticas genéricas"):
     assertEquals(analysis.matchStats.totalEvents, 17)
     assertEquals(analysis.playerStats.map(_.playerId), List("p1", "p2", "p3"))
 

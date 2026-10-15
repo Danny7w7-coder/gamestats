@@ -1,17 +1,17 @@
 package gamestats.stats
 
 import gamestats.model.*
-import gamestats.rules.{CleanRaceRule, ItemMasterRule, RacingComebackRule, Rule}
+import gamestats.rules.{CleanRaceRule, RacingComebackRule, Rule, WireToWireRule}
 import gamestats.validation.{ContextCheck, RacingCheck}
 
-/** Análisis de carreras arcade (por vueltas, posiciones y objetos). Todo puro:
-  * recibe el lote y devuelve el resultado.
+/** Análisis de carreras por vueltas y posiciones. Todo puro: recibe el lote y
+  * devuelve el resultado.
   */
 object RacingAnalyzer extends GameAnalyzer:
 
   val gameId: String = "racing"
 
-  override def rules: List[Rule] = List(RacingComebackRule, CleanRaceRule, ItemMasterRule)
+  override def rules: List[Rule] = List(RacingComebackRule, CleanRaceRule, WireToWireRule)
 
   override def context: ContextCheck = RacingCheck
 
@@ -29,7 +29,6 @@ object RacingAnalyzer extends GameAnalyzer:
       matchId = batch.matchId,
       gameId = gameId,
       matchStats = GenericStats.matchStats(batch).copy(winner = winner(batch)),
-      teamStats = None, // racing no tiene equipos
       playerStats = playerStats,
       patterns = Nil
     )
@@ -75,12 +74,11 @@ object RacingAnalyzer extends GameAnalyzer:
 
   import GenericStats.countOf
 
-  val overtakes: List[Event] => Double   = countOf { case _: Overtake => }
-  val itemsPicked: List[Event] => Double = countOf { case _: ItemPickup => }
-  val itemsUsed: List[Event] => Double   = countOf { case _: ItemUsed => }
-  val boostsUsed: List[Event] => Double  = countOf { case ItemUsed(_, Item.Boost, _) => }
+  val overtakes: List[Event] => Double  = countOf { case _: Overtake => }
   /** Choques que provocó el jugador (es el que manda el COLLISION). */
-  val collisions: List[Event] => Double  = countOf { case _: Collision => }
+  val collisions: List[Event] => Double = countOf { case _: Collision => }
+  /** Vueltas que cerró en 1° lugar. */
+  val lapsLed: List[Event] => Double    = countOf { case LapCompleted(_, _, 1) => }
 
   def metrics(events: List[Event]): Map[String, Double] =
     Map(
@@ -90,10 +88,8 @@ object RacingAnalyzer extends GameAnalyzer:
       "penaltySeconds"  -> penaltySeconds(events).toDouble,
       "effectiveTimeMs" -> effectiveTimeMs(events),
       "overtakes"       -> overtakes(events),
-      "itemsPicked"     -> itemsPicked(events),
-      "itemsUsed"       -> itemsUsed(events),
-      "boostsUsed"      -> boostsUsed(events),
-      "collisions"      -> collisions(events)
+      "collisions"      -> collisions(events),
+      "lapsLed"         -> lapsLed(events)
     )
 
   // ---------------------------------------------------------------------------
