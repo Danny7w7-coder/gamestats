@@ -24,8 +24,8 @@ func scriptedFor(t *testing.T, gameID string) map[string]Match {
 
 func TestScriptedAlwaysGenerated(t *testing.T) {
 	ms := Generate(42, Counts{})
-	if len(ms) != 13 {
-		t.Fatalf("escenarios = %d, se esperaban 13", len(ms))
+	if len(ms) != 14 {
+		t.Fatalf("escenarios = %d, se esperaban 14", len(ms))
 	}
 	for _, m := range ms {
 		if m.Script == "" {
@@ -33,8 +33,8 @@ func TestScriptedAlwaysGenerated(t *testing.T) {
 		}
 	}
 	// Con partidas aleatorias, los escenarios siguen estando.
-	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1, Tetris: 1})); got != 13+2+3+1+1 {
-		t.Fatalf("partidas = %d, se esperaban 20", got)
+	if got := len(Generate(42, Counts{Racing: 2, Football: 3, Fighting: 1, Tetris: 1})); got != 14+2+3+1+1 {
+		t.Fatalf("partidas = %d, se esperaban 21", got)
 	}
 }
 
@@ -287,13 +287,18 @@ func TestScriptedFootball(t *testing.T) {
 	}
 }
 
-// roundResults devuelve, en orden, el ganador y la vida restante de cada round.
+// roundResults devuelve, en orden, el resultado de cada round: el ganador
+// (o "empate") y la vida que le quedó al ganador (0 en un empate).
 func roundResults(t *testing.T, m Match) (winners []string, health []int) {
 	t.Helper()
 	for _, e := range m.Events {
-		if e.Action == "ROUND_WON" {
+		switch e.Action {
+		case "ROUND_WON":
 			winners = append(winners, e.PlayerID)
 			health = append(health, int(data(t, e)["remainingHealth"].(float64)))
+		case "ROUND_DRAW":
+			winners = append(winners, "empate")
+			health = append(health, 0)
 		}
 	}
 	return winners, health
@@ -302,43 +307,52 @@ func roundResults(t *testing.T, m Match) (winners []string, health []int) {
 func TestScriptedFighting(t *testing.T) {
 	fighting := scriptedFor(t, "fighting")
 
-	// Flawless + fatality: p1 gana 2-0, el round 1 con vida 100 y el 2 con 25,
-	// y la última acción es su FATALITY. Usa las 10 acciones.
-	fl := fighting["flawless"]
-	winners, health := roundResults(t, fl)
-	if !reflect.DeepEqual(winners, []string{"p1", "p1"}) || !reflect.DeepEqual(health, []int{100, 25}) {
-		t.Errorf("flawless: ganadores %v con vida %v", winners, health)
-	}
-	last := fl.Events[len(fl.Events)-2] // el último es MATCH_FINISHED
-	if last.Action != "FATALITY" || last.PlayerID != "p1" {
-		t.Errorf("flawless: la última acción es %s de %s", last.Action, last.PlayerID)
-	}
-	used := map[string]bool{}
-	for _, e := range fl.Events {
-		used[e.Action] = true
-	}
-	for action := range validation.GameActions["fighting"] {
-		if !used[action] {
-			t.Errorf("flawless: no usa %s", action)
-		}
+	// Flawless: p1 gana 2-0, el round 1 con vida 100 y el 2 con 35.
+	winners, health := roundResults(t, fighting["flawless"])
+	if !reflect.DeepEqual(winners, []string{"p1", "p1"}) || !reflect.DeepEqual(health, []int{100, 35}) {
+		t.Errorf("flawless: rounds %v con vida %v", winners, health)
 	}
 
 	// Remontada: p1 gana el round 1 por tiempo y p2 los rounds 2 y 3; hay una
-	// pausa y no hay fatality.
+	// pausa.
 	cb := fighting["comeback"]
 	winners, health = roundResults(t, cb)
 	if !reflect.DeepEqual(winners, []string{"p1", "p2", "p2"}) || !reflect.DeepEqual(health, []int{60, 90, 25}) {
-		t.Errorf("comeback: ganadores %v con vida %v", winners, health)
+		t.Errorf("comeback: rounds %v con vida %v", winners, health)
 	}
 	paused := false
 	for _, e := range cb.Events {
 		paused = paused || e.Type == "MATCH_PAUSED"
-		if e.Action == "FATALITY" {
-			t.Errorf("comeback: no debería tener fatality")
-		}
 	}
 	if !paused {
 		t.Errorf("comeback: sin pausa")
+	}
+
+	// Combo master: round 1 empatado por doble KO, un combo de 6 golpes y p1
+	// gana 2-0. Usa las 6 acciones de fighting.
+	co := fighting["combo"]
+	winners, _ = roundResults(t, co)
+	if !reflect.DeepEqual(winners, []string{"empate", "p1", "p1"}) {
+		t.Errorf("combo: rounds %v", winners)
+	}
+	maxHits := 0.0
+	used := map[string]bool{}
+	for _, e := range co.Events {
+		used[e.Action] = true
+		if e.Action == "COMBO" {
+			maxHits = max(maxHits, data(t, e)["hits"].(float64))
+		}
+		if e.Action == "ROUND_DRAW" && data(t, e)["method"] != "double_ko" {
+			t.Errorf("combo: empate por %v", data(t, e)["method"])
+		}
+	}
+	if maxHits < 5 {
+		t.Errorf("combo: el combo más largo tiene %v golpes", maxHits)
+	}
+	for action := range validation.GameActions["fighting"] {
+		if !used[action] {
+			t.Errorf("combo: no usa %s", action)
+		}
 	}
 }
 

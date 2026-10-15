@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -304,10 +303,9 @@ func TestFootballUsesAllActions(t *testing.T) {
 }
 
 // checkFighting revisa las reglas de contexto de fighting (las mismas que
-// aplica Scala): 2 luchadores con personaje, round ≤ rounds, golpe fallado
-// con damage 0, COMBO_BREAKER solo tras un COMBO del rival en ese round,
-// FATAL_BLOW una vez por luchador y con health ≤ 30, un ROUND_WON por round,
-// y la FATALITY la hace el ganador y es la última acción.
+// aplica Scala): 2 luchadores con personaje, golpes solo punch o kick, golpe
+// fallado con damage 0, round ≤ rounds, un solo resultado por round
+// (ROUND_WON o ROUND_DRAW) y nada después del ROUND_WON que decide la pelea.
 func checkFighting(t *testing.T, m Match) {
 	t.Helper()
 	start := data(t, m.Events[0])
@@ -317,11 +315,9 @@ func checkFighting(t *testing.T, m Match) {
 	}
 
 	joined := 0
-	comboOn := map[string]string{} // víctima -> "atacante/round" de su último combo sin cortar
-	fatalUsed := map[string]bool{}
 	roundDone := map[int]bool{}
 	wins := map[string]int{}
-	finished := false
+	champion := ""
 
 	for _, e := range m.Events {
 		if e.Type == "PLAYER_JOINED" {
@@ -333,53 +329,43 @@ func checkFighting(t *testing.T, m Match) {
 		if e.Type != "PLAYER_ACTION" {
 			continue
 		}
-		if finished {
-			t.Fatalf("%s: %s después de la FATALITY", m.ID, e.EventID)
+		if champion != "" {
+			t.Fatalf("%s: %s después de que %s ganó la pelea", m.ID, e.EventID, champion)
 		}
 		d := data(t, e)
-		round := 0
-		if r, ok := d["round"]; ok {
-			round = int(r.(float64))
-			if round < 1 || round > rounds {
-				t.Fatalf("%s: %s en el round %d de %d", m.ID, e.EventID, round, rounds)
-			}
+		round := int(d["round"].(float64))
+		if round < 1 || round > rounds {
+			t.Fatalf("%s: %s en el round %d de %d", m.ID, e.EventID, round, rounds)
 		}
 		if d["hit"] == false && d["damage"] != 0.0 {
 			t.Fatalf("%s: %s falló pero tiene damage %v", m.ID, e.EventID, d["damage"])
 		}
-		key := e.PlayerID + "/" + strconv.Itoa(round)
 
 		switch e.Action {
-		case "COMBO":
-			comboOn[d["targetId"].(string)] = key
-		case "COMBO_BREAKER":
-			if comboOn[e.PlayerID] != d["attackerId"].(string)+"/"+strconv.Itoa(round) {
-				t.Fatalf("%s: %s corta un combo que no existe", m.ID, e.EventID)
+		case "ATTACK":
+			if d["move"] != "punch" && d["move"] != "kick" {
+				t.Fatalf("%s: %s con move %v", m.ID, e.EventID, d["move"])
 			}
-			delete(comboOn, e.PlayerID)
-		case "FATAL_BLOW":
-			if fatalUsed[e.PlayerID] || d["health"].(float64) > 30 {
-				t.Fatalf("%s: %s FATAL_BLOW repetido o con health %v", m.ID, e.EventID, d["health"])
-			}
-			fatalUsed[e.PlayerID] = true
-		case "ROUND_WON":
+		case "ROUND_WON", "ROUND_DRAW":
 			if roundDone[round] {
-				t.Fatalf("%s: el round %d tiene dos ganadores", m.ID, round)
+				t.Fatalf("%s: el round %d tiene dos resultados", m.ID, round)
 			}
 			roundDone[round] = true
-			wins[e.PlayerID]++
-		case "FATALITY":
-			if wins[e.PlayerID] < rounds/2+1 {
-				t.Fatalf("%s: FATALITY de %s, que no ganó la pelea", m.ID, e.PlayerID)
+			if e.Action == "ROUND_WON" {
+				wins[e.PlayerID]++
+				if wins[e.PlayerID] >= rounds/2+1 {
+					champion = e.PlayerID
+				}
 			}
-			finished = true
 		}
 	}
 	if joined != 2 {
 		t.Fatalf("%s: %d luchadores", m.ID, joined)
 	}
-	if wins["p1"] < rounds/2+1 && wins["p2"] < rounds/2+1 {
-		t.Fatalf("%s: nadie ganó la pelea (rounds ganados %v de %d)", m.ID, wins, rounds)
+	// La pelea termina cuando alguien gana la mayoría o cuando se jugaron
+	// todos los rounds (con empates puede no haber ganador).
+	if champion == "" && len(roundDone) != rounds {
+		t.Fatalf("%s: sin ganador y con %d de %d rounds jugados", m.ID, len(roundDone), rounds)
 	}
 }
 

@@ -19,11 +19,10 @@ var GameActions = map[string]map[string]bool{
 		"SAVE": true, "TACKLE": true, "INTERCEPTION": true, "DRIBBLE": true,
 		"FOUL": true, "CORNER": true,
 	},
-	// Pelea 1 vs 1 estilo Mortal Kombat (10 acciones).
+	// Pelea 1 vs 1 básica, por rounds (6 acciones).
 	"fighting": {
-		"ATTACK": true, "SPECIAL_MOVE": true, "COMBO": true, "THROW": true, "BLOCK": true,
-		"COMBO_BREAKER": true, "KNOCKDOWN": true, "FATAL_BLOW": true, "ROUND_WON": true,
-		"FATALITY": true,
+		"ATTACK": true, "BLOCK": true, "COMBO": true, "KNOCKDOWN": true,
+		"ROUND_WON": true, "ROUND_DRAW": true,
 	},
 	// Tetris clásico de un jugador (13 acciones).
 	"tetris": {

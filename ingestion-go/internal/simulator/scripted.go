@@ -27,6 +27,7 @@ func scriptedMatches(seed int64) []Match {
 		footballCleanSheet(id("foot", "cleansheet"), scriptBase.Add(7*time.Hour)),
 		fightFlawless(id("fight", "flawless"), scriptBase.Add(9*time.Hour)),
 		fightComeback(id("fight", "comeback"), scriptBase.Add(9*time.Hour+10*time.Minute)),
+		fightCombo(id("fight", "combo"), scriptBase.Add(9*time.Hour+20*time.Minute)),
 		tetrisBackToBack(id("tetris", "b2b"), scriptBase.Add(10*time.Hour)),
 		tetrisPerfectClear(id("tetris", "perfect"), scriptBase.Add(10*time.Hour+30*time.Minute)),
 	}
@@ -222,72 +223,102 @@ func footballCleanSheet(id string, start time.Time) Match {
 // Fighting
 //
 // Basados en los fixtures de Danny (fighting_match_ok y fighting_comeback).
-// fightGame lleva la vida de cada luchador: remainingHealth y health salen
-// solos del daño de cada golpe.
+// fightGame lleva la vida de cada luchador: remainingHealth sale solo del
+// daño de cada golpe.
 
 // fightFlawless: Scorpion (p1) contra Sub-Zero (p2), al mejor de 3. p1 gana el
 // round 1 sin recibir daño (flawless victory: vida 100) y el round 2 por KO
-// con vida 25, después de cortar un combo y usar su FATAL_BLOW. Termina con
-// una FATALITY. Usa las 10 acciones.
+// con vida 35. Con 2 rounds ganados, la pelea termina.
 func fightFlawless(id string, start time.Time) Match {
-	g := newFightGame(id, start, "the_pit", 3, fighters[0], fighters[1])
+	g := newFightGame(id, start, "the_pit", 3, "scorpion", "sub-zero")
 	// Round 1: p2 no acierta ni un golpe.
 	g.attack("p1", "punch", 10)
-	g.attack("p2", "uppercut", 0)
+	g.attack("p2", "kick", 0)
 	g.block("p1")
-	g.special("p1", "spear", 15)
 	g.combo("p1", 4, 30)
-	g.throw("p1", 15)
+	g.attack("p1", "kick", 30)
 	g.knockdown("p1")
-	g.attack("p1", "uppercut", 30) // p2 queda en 0
-	g.roundWon("p1", "ko")         // vida 100: flawless
-	// Round 2: p2 casi lo da vuelta, pero p1 corta el combo y usa su golpe fatal.
-	g.special("p2", "ice_ball", 10)
-	g.combo("p2", 5, 35)
-	g.comboBreaker("p1")
-	g.attack("p2", "kick", 30) // p1 queda con 25
-	g.fatalBlow("p1", 40)      // health 25
+	g.attack("p1", "kick", 30) // p2 queda en 0
+	g.roundWon("p1", "ko")     // vida 100: flawless
+	// Round 2: más parejo, pero gana p1.
+	g.combo("p2", 3, 35)
+	g.attack("p1", "kick", 40)
+	g.attack("p2", "punch", 30) // p1 queda con 35
 	g.combo("p1", 3, 25)
-	g.attack("p2", "punch", 0)
-	g.attack("p1", "uppercut", 35) // p2 queda en 0
+	g.attack("p1", "punch", 0)
+	g.block("p2")
+	g.attack("p1", "kick", 35) // p2 queda en 0
 	g.roundWon("p1", "ko")
-	g.fatality("p1")
-	return scripted(g.finish(), "flawless + fatality: p1 gana el round 1 sin recibir daño y remata con una fatality")
+	return scripted(g.finish(), "flawless: p1 gana el round 1 sin recibir daño y gana la pelea 2-0")
 }
 
 // fightComeback: Liu Kang (p1) contra Kitana (p2), al mejor de 3. p1 gana el
 // round 1 por tiempo; p2 gana los rounds 2 y 3 (remontada). Entre el 2 y el 3
-// hay una pausa. En el round 3 p2 queda con vida 25 y da vuelta la pelea con
-// su FATAL_BLOW. Sin fatality.
+// hay una pausa.
 func fightComeback(id string, start time.Time) Match {
-	g := newFightGame(id, start, "living_forest", 3, fighters[2], fighters[3])
+	g := newFightGame(id, start, "living_forest", 3, "liu_kang", "kitana")
 	// Round 1: se va a tiempo; p1 termina con 60 y p2 con 45.
 	g.attack("p1", "punch", 15)
 	g.attack("p2", "kick", 20)
 	g.combo("p1", 3, 30)
 	g.block("p2")
-	g.throw("p1", 10)
+	g.attack("p1", "kick", 10)
 	g.attack("p2", "punch", 20)
 	g.wait(70 * time.Second)
 	g.roundWon("p1", "timeout")
 	// Round 2: p2 gana por KO con vida 90.
-	g.combo("p2", 5, 45)
+	g.combo("p2", 4, 45)
 	g.attack("p1", "kick", 0)
 	g.attack("p1", "punch", 10)
-	g.special("p2", "fan_toss", 25)
+	g.attack("p2", "kick", 25)
 	g.knockdown("p2")
-	g.attack("p2", "uppercut", 30) // p1 queda en 0
+	g.attack("p2", "kick", 30) // p1 queda en 0
 	g.roundWon("p2", "ko")
 	g.pause("player_pause", 20*time.Second)
-	// Round 3: p1 deja a p2 con 25 y p2 lo da vuelta con su golpe fatal.
+	// Round 3: p1 deja a p2 con 25, pero p2 lo da vuelta con dos combos.
 	g.combo("p1", 4, 40)
 	g.attack("p1", "punch", 15)
-	g.special("p1", "dragon_fire", 20) // p2 queda con 25
-	g.fatalBlow("p2", 50)              // health 25
+	g.attack("p1", "kick", 20) // p2 queda con 25
+	g.combo("p2", 4, 50)
 	g.combo("p2", 3, 30)
-	g.attack("p2", "uppercut", 20) // p1 queda en 0
+	g.attack("p2", "punch", 20) // p1 queda en 0
 	g.roundWon("p2", "ko")
 	return scripted(g.finish(), "remontada: p1 gana el round 1 y p2 gana los rounds 2 y 3")
+}
+
+// fightCombo: Raiden (p1) contra Sonya (p2), al mejor de 3. El round 1 termina
+// en doble KO (ROUND_DRAW): no suma para nadie. En el round 2 p1 conecta un
+// combo de 6 golpes (combo master) y gana; en el 3 vuelve a ganar y se lleva
+// la pelea. Usa las 6 acciones.
+func fightCombo(id string, start time.Time) Match {
+	g := newFightGame(id, start, "dead_pool", 3, "raiden", "sonya")
+	// Round 1: los dos quedan en 0 a la vez.
+	g.attack("p1", "kick", 20)
+	g.combo("p2", 4, 40)
+	g.combo("p1", 3, 35)
+	g.attack("p2", "kick", 30)
+	g.attack("p1", "kick", 25)  // p2 queda con 20
+	g.attack("p2", "punch", 15) // p1 queda con 15
+	g.attack("p1", "punch", 20) // p2 queda en 0...
+	g.attack("p2", "kick", 15)  // ...y p1 también: doble KO
+	g.roundDraw("p1", "double_ko")
+	// Round 2: el combo de 6 golpes.
+	g.combo("p1", 6, 50)
+	g.attack("p2", "punch", 0)
+	g.block("p1")
+	g.combo("p2", 3, 30)
+	g.attack("p1", "kick", 30)
+	g.knockdown("p1")
+	g.attack("p1", "punch", 20) // p2 queda en 0
+	g.roundWon("p1", "ko")
+	// Round 3: p1 gana y se lleva la pelea 2-0 (con un empate).
+	g.attack("p2", "kick", 25)
+	g.combo("p1", 4, 40)
+	g.attack("p1", "kick", 30)
+	g.attack("p2", "punch", 20)
+	g.attack("p1", "kick", 30) // p2 queda en 0
+	g.roundWon("p1", "ko")
+	return scripted(g.finish(), "combo master: doble KO en el round 1 y un combo de 6 golpes de p1, que gana 2-0")
 }
 
 // ---------------------------------------------------------------------------
