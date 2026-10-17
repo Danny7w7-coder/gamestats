@@ -1,13 +1,15 @@
 # CD de GameStats: prueba el sistema completo con docker compose, publica las
-# imágenes en GitHub Container Registry y (si está habilitado) despliega.
+# imágenes en GitHub Container Registry y verifica el deployment.
 #
 # - En un PR hacia main solo corre la integración (así se prueba antes de mergear).
-# - En un push a main corren los tres jobs, en orden.
+# - En un push a main, o al crear un tag de versión (v1.0), corren los tres
+#   jobs en orden. Con un tag, las imágenes se publican también con ese nombre.
 name: CD
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -52,7 +54,9 @@ jobs:
         if: always()
         run: docker compose down -v
 
-  # 2. Publica las dos imágenes en ghcr.io/<owner>/gamestats-{analytics,ingestion}.
+  # 2. Publica las dos imágenes en ghcr.io/<owner>/gamestats-{analytics,ingestion},
+  #    para amd64 y arm64. Tags: el hash del commit siempre; "latest" en main;
+  #    el nombre de la versión (v1.0) cuando se crea un tag de git.
   publish:
     needs: integration
     if: github.event_name != 'pull_request'
@@ -60,8 +64,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      tag: ${{ steps.tags.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+
+      # QEMU: la etapa final de cada imagen corre algún comando en arm64.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -69,31 +79,86 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Owner en minúscula (GHCR no acepta mayúsculas)
-        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - name: Calcular los tags
+        id: tags
+        run: |
+          owner=${GITHUB_REPOSITORY_OWNER,,} # GHCR no acepta mayúsculas
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then extra="$GITHUB_REF_NAME"; tag="$GITHUB_REF_NAME"
+          else extra="latest"; tag="$GITHUB_SHA"; fi
+          for name in analytics ingestion; do
+            image=ghcr.io/$owner/gamestats-$name
+            echo "$name=$image:$GITHUB_SHA,$image:$extra" >> "$GITHUB_OUTPUT"
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Construir y publicar gamestats-analytics
-        run: |
-          image=ghcr.io/$OWNER/gamestats-analytics
-          docker build -t "$image:${{ github.sha }}" -t "$image:latest" ./analytics-scala
-          docker push --all-tags "$image"
+        uses: docker/build-push-action@v6
+        with:
+          context: ./analytics-scala
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.analytics }}
+          cache-from: type=gha,scope=analytics
+          cache-to: type=gha,mode=max,scope=analytics
 
       - name: Construir y publicar gamestats-ingestion
-        run: |
-          image=ghcr.io/$OWNER/gamestats-ingestion
-          docker build -t "$image:${{ github.sha }}" -t "$image:latest" ./ingestion-go
-          docker push --all-tags "$image"
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ingestion-go
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.ingestion }}
+          cache-from: type=gha,scope=ingestion
+          cache-to: type=gha,mode=max,scope=ingestion
 
-  # 3. Despliegue. Solo corre si la variable del repo DEPLOY_ENABLED es 'true'
-  #    (Settings > Secrets and variables > Actions > Variables).
+  # 3. Deployment: levanta el sistema con docker-compose.deploy.yml usando las
+  #    imágenes DESCARGADAS de GHCR (no las recién compiladas), corre el
+  #    simulador y verifica las 30 partidas. Es exactamente lo que hace quien
+  #    recibe GameStats: si esto pasa, la versión publicada funciona.
   deploy:
     needs: publish
-    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GAMESTATS_TAG: ${{ needs.publish.outputs.tag }}
     steps:
-      - name: Desplegar
+      - uses: actions/checkout@v4
+
+      # Mientras los paquetes sean privados, hace falta iniciar sesión para bajarlos.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Descargar las imágenes publicadas (${{ env.GAMESTATS_TAG }})
+        run: docker compose -f docker-compose.deploy.yml --profile sim pull
+
+      - name: Levantar analytics e ingestion
+        run: docker compose -f docker-compose.deploy.yml up -d --wait
+
+      - name: Correr el simulador (seed 42)
+        run: docker compose -f docker-compose.deploy.yml run --rm simulator
+
+      - name: Verificar las 30 partidas
         run: |
-          # TODO: definir el destino del deployment (pendiente de decidir con Dylan).
-          echo "Imágenes listas para desplegar:"
-          echo "  ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gamestats-analytics:${{ github.sha }}"
-          echo "  ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/gamestats-ingestion:${{ github.sha }}"
+          expected=30
+          for i in $(seq 1 30); do
+            count=$(curl -fs http://localhost:8081/results | jq length)
+            echo "partidas en /results: $count"
+            [ "$count" -ge "$expected" ] && break
+            sleep 2
+          done
+          test "$count" -ge "$expected"
+          echo "Versión $GAMESTATS_TAG desplegada y verificada."
+
+      - name: Logs de los servicios (si algo falló)
+        if: failure()
+        run: docker compose -f docker-compose.deploy.yml logs
+
+      - name: Bajar todo
+        if: always()
+        run: docker compose -f docker-compose.deploy.yml down -v
