@@ -222,7 +222,7 @@ docker compose -f docker-compose.deploy.yml down
 
 Para usar otra versión publicada: `GAMESTATS_TAG=<tag> docker compose -f docker-compose.deploy.yml up -d --wait` (en PowerShell: `$env:GAMESTATS_TAG="<tag>"` antes del comando).
 
-**Sin internet.** Con las imágenes ya descargadas una vez, se pueden guardar en un archivo y cargar en otra máquina:
+**Sin internet.** Con las imágenes ya descargadas una vez, se pueden guardar en un archivo y volver a cargar sin conexión. `docker save` guarda solo la arquitectura de la máquina donde se corre (amd64 o arm64), así que el archivo sirve en esa misma máquina o en otra de la misma arquitectura:
 
 ```bash
 docker save -o gamestats.tar ghcr.io/danny7w7-coder/gamestats-analytics:v1.0 ghcr.io/danny7w7-coder/gamestats-ingestion:v1.0
@@ -286,7 +286,9 @@ Las pruebas de los dos módulos usan los mismos ejemplos de `contracts/fixtures/
 
 ### Deployment
 
-El entorno de deployment es cualquier máquina con Docker. El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que lo publicado funciona tal como lo va a usar quien lo reciba: baja las imágenes del registro, levanta el sistema y corre el simulador.
+El entorno de deployment definido por el equipo es **Docker en la máquina de quien evalúa el sistema, con las imágenes publicadas en GitHub Container Registry**. No hay un servidor permanente con una URL pública: cada versión se publica en el registro y se ejecuta donde se necesite con un solo comando ([Opción 3](#opción-3-versión-desplegada-sin-compilar)).
+
+El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que lo publicado funciona tal como lo va a usar quien lo reciba: en una máquina limpia (el runner de GitHub Actions), baja las imágenes del registro, levanta el sistema, corre el simulador y verifica las 30 partidas. Al terminar la verificación el sistema se apaga.
 
 Las imágenes publicadas son:
 
