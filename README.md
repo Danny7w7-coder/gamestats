@@ -201,26 +201,43 @@ En Windows (PowerShell) se usa `curl.exe` en lugar de `curl`.
 
 ### Opción 3: versión desplegada (sin compilar)
 
-Requisito: solo [Docker](https://www.docker.com/). Las imágenes ya construidas se descargan de GitHub Container Registry, así que no hace falta Java, sbt ni Go, y no se compila nada. Sirven en Windows, Linux y Mac (también con chip Apple). Basta con el archivo [`docker-compose.deploy.yml`](docker-compose.deploy.yml):
+Requisito: solo [Docker](https://www.docker.com/). Las imágenes ya construidas se descargan de GitHub Container Registry, así que no hace falta Java, sbt ni Go, no se compila nada y no hace falta ningún archivo del repositorio. Sirven en Windows, Linux y Mac (también con chip Apple).
 
 ```bash
-# 1. Descargar las imágenes de la versión v1.0 y levantar los dos servicios
+# 1. Una red para que los dos servicios se encuentren por nombre
+docker network create gamestats
+
+# 2. Análisis (Scala) e ingestión (Go), cada uno en su contenedor (la primera vez descarga las imágenes)
+docker run -d --name analytics --network gamestats -p 8081:8081 ghcr.io/danny7w7-coder/gamestats-analytics:v1.0
+docker run -d --name ingestion --network gamestats -p 8080:8080 -e SCALA_URL=http://analytics:8081 ghcr.io/danny7w7-coder/gamestats-ingestion:v1.0
+
+# 3. Enviar las partidas de prueba con el simulador
+docker run --rm --network gamestats --entrypoint /app/simulator ghcr.io/danny7w7-coder/gamestats-ingestion:v1.0 -target http://ingestion:8080
+```
+
+Los resultados se ven en el navegador:
+
+- <http://localhost:8081/results>: todas las partidas analizadas
+- <http://localhost:8081/results/c4-s42-double>: una partida
+- <http://localhost:8081/players/p1>: un jugador en todas sus partidas
+- <http://localhost:8080/matches>: el estado de cada partida en la ingestión
+
+Para apagar:
+
+```bash
+docker rm -f analytics ingestion
+docker network rm gamestats
+```
+
+**Con Docker Compose.** Lo mismo, en un solo archivo ([`docker-compose.deploy.yml`](docker-compose.deploy.yml)), que además espera a que cada servicio esté listo antes de arrancar el siguiente:
+
+```bash
 docker compose -f docker-compose.deploy.yml up -d --wait
-
-# 2. Enviar las partidas de prueba
 docker compose -f docker-compose.deploy.yml run --rm simulator
-
-# 3. Ver los resultados (en Windows: curl.exe)
-curl http://localhost:8081/results
-curl http://localhost:8081/results/c4-s42-double
-curl http://localhost:8081/players/p1
-curl http://localhost:8080/matches
-
-# 4. Apagar
 docker compose -f docker-compose.deploy.yml down
 ```
 
-Para usar otra versión publicada: `GAMESTATS_TAG=<tag> docker compose -f docker-compose.deploy.yml up -d --wait` (en PowerShell: `$env:GAMESTATS_TAG="<tag>"` antes del comando).
+Para usar otra versión publicada con Compose: `GAMESTATS_TAG=<tag> docker compose -f docker-compose.deploy.yml up -d --wait` (en PowerShell: `$env:GAMESTATS_TAG="<tag>"` antes del comando).
 
 **Sin internet.** Con las imágenes ya descargadas una vez, se pueden guardar en un archivo y volver a cargar sin conexión. `docker save` guarda solo la arquitectura de la máquina donde se corre (amd64 o arm64), así que el archivo sirve en esa misma máquina o en otra de la misma arquitectura:
 
@@ -286,7 +303,7 @@ Las pruebas de los dos módulos usan los mismos ejemplos de `contracts/fixtures/
 
 ### Deployment
 
-El entorno de deployment definido por el equipo es **Docker en la máquina de quien evalúa el sistema, con las imágenes publicadas en GitHub Container Registry**. No hay un servidor permanente con una URL pública: cada versión se publica en el registro y se ejecuta donde se necesite con un solo comando ([Opción 3](#opción-3-versión-desplegada-sin-compilar)).
+Cada versión de GameStats se publica como dos imágenes en GitHub Container Registry, y se ejecuta en cualquier computadora que tenga Docker, por ejemplo la del profesor, sin compilar ni instalar nada más ([Opción 3](#opción-3-versión-desplegada-sin-compilar)). Ese es el entorno de ejecución que elegimos: no mantenemos un servidor encendido con una dirección pública.
 
 El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que lo publicado funciona tal como lo va a usar quien lo reciba: en una máquina limpia (el runner de GitHub Actions), baja las imágenes del registro, levanta el sistema, corre el simulador y verifica las 30 partidas. Al terminar la verificación el sistema se apaga.
 
