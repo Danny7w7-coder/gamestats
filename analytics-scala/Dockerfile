@@ -1,5 +1,7 @@
 # --- Etapa 1: compilar el fat jar con sbt -------------------------------------
-FROM eclipse-temurin:21-jdk AS build
+# Se compila en la arquitectura de la máquina que construye ($BUILDPLATFORM):
+# el jar sirve igual en amd64 y arm64, así que no hace falta compilar emulado.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && curl -fsSL https://github.com/sbt/sbt/releases/download/v1.10.7/sbt-1.10.7.tgz | tar xz -C /opt \
     && rm -rf /var/lib/apt/lists/*
@@ -16,6 +18,7 @@ COPY src ./src
 RUN sbt -batch assembly
 
 # --- Etapa 2: solo el JRE y el jar ----------------------------------------------
+# Esta etapa sí es de cada arquitectura (amd64 o arm64, por ejemplo una Mac M1).
 # eclipse-temurin trae curl, que usa el healthcheck del docker-compose.
 FROM eclipse-temurin:21-jre
 WORKDIR /app

@@ -199,6 +199,36 @@ go run ./cmd/simulator -target http://localhost:8080
 
 En Windows (PowerShell) se usa `curl.exe` en lugar de `curl`.
 
+### Opción 3: versión desplegada (sin compilar)
+
+Requisito: solo [Docker](https://www.docker.com/). Las imágenes ya construidas se descargan de GitHub Container Registry, así que no hace falta Java, sbt ni Go, y no se compila nada. Sirven en Windows, Linux y Mac (también con chip Apple). Basta con el archivo [`docker-compose.deploy.yml`](docker-compose.deploy.yml):
+
+```bash
+# 1. Descargar las imágenes de la versión v1.0 y levantar los dos servicios
+docker compose -f docker-compose.deploy.yml up -d --wait
+
+# 2. Enviar las partidas de prueba
+docker compose -f docker-compose.deploy.yml run --rm simulator
+
+# 3. Ver los resultados (en Windows: curl.exe)
+curl http://localhost:8081/results
+curl http://localhost:8081/results/c4-s42-double
+curl http://localhost:8081/players/p1
+curl http://localhost:8080/matches
+
+# 4. Apagar
+docker compose -f docker-compose.deploy.yml down
+```
+
+Para usar otra versión publicada: `GAMESTATS_TAG=<tag> docker compose -f docker-compose.deploy.yml up -d --wait` (en PowerShell: `$env:GAMESTATS_TAG="<tag>"` antes del comando).
+
+**Sin internet.** Con las imágenes ya descargadas una vez, se pueden guardar en un archivo y volver a cargar sin conexión. `docker save` guarda solo la arquitectura de la máquina donde se corre (amd64 o arm64), así que el archivo sirve en esa misma máquina o en otra de la misma arquitectura:
+
+```bash
+docker save -o gamestats.tar ghcr.io/danny7w7-coder/gamestats-analytics:v1.0 ghcr.io/danny7w7-coder/gamestats-ingestion:v1.0
+docker load -i gamestats.tar
+```
+
 ### Variables de entorno
 
 | Servicio | Variable | Por defecto | Qué hace |
@@ -252,16 +282,31 @@ Las pruebas de los dos módulos usan los mismos ejemplos de `contracts/fixtures/
 |---|---|---|
 | `ci-go.yml` | Cambios en `ingestion-go/` o `contracts/` | `go vet`, `go test -race`, `go build`, `docker build` |
 | `ci-scala.yml` | Cambios en `analytics-scala/` o `contracts/` | `sbt test`, `sbt assembly`, `docker build` |
-| `cd.yml` | Pull requests hacia `main` y cada push a `main` | 1) **integración**: levanta el sistema con Docker Compose, corre el simulador y verifica que Scala haya guardado resultados; 2) **publicación** (solo en `main`): sube las imágenes a GitHub Container Registry; 3) **despliegue** (solo si la variable del repositorio `DEPLOY_ENABLED` es `true`) |
+| `cd.yml` | Pull requests hacia `main`, cada push a `main` y cada tag de versión (`v*`) | 1) **integración**: levanta el sistema con Docker Compose (compilando), corre el simulador y verifica las 30 partidas; 2) **publicación** (no en PRs): construye las dos imágenes para amd64 y arm64 y las sube a GitHub Container Registry; 3) **deployment** (no en PRs): levanta el sistema con `docker-compose.deploy.yml` usando las imágenes **descargadas** de GHCR, corre el simulador y verifica las 30 partidas |
+
+### Deployment
+
+El entorno de deployment definido por el equipo es **Docker en la máquina de quien evalúa el sistema, con las imágenes publicadas en GitHub Container Registry**. No hay un servidor permanente con una URL pública: cada versión se publica en el registro y se ejecuta donde se necesite con un solo comando ([Opción 3](#opción-3-versión-desplegada-sin-compilar)).
+
+El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que lo publicado funciona tal como lo va a usar quien lo reciba: en una máquina limpia (el runner de GitHub Actions), baja las imágenes del registro, levanta el sistema, corre el simulador y verifica las 30 partidas. Al terminar la verificación el sistema se apaga.
 
 Las imágenes publicadas son:
 
 ```
-ghcr.io/danny7w7-coder/gamestats-analytics:latest
-ghcr.io/danny7w7-coder/gamestats-ingestion:latest
+ghcr.io/danny7w7-coder/gamestats-analytics:<tag>
+ghcr.io/danny7w7-coder/gamestats-ingestion:<tag>
 ```
 
-Cada una también se publica con el hash del commit como etiqueta. Como el repositorio es privado, para descargarlas hay que iniciar sesión primero (`docker login ghcr.io`).
+con estos tags: el hash de cada commit, `latest` (lo último de `main`) y el nombre de cada versión. Una versión es fija: aunque después haya cambios en `main`, `v1.0` siempre es la misma.
+
+Para publicar una versión nueva (por ejemplo, la de la entrega):
+
+```bash
+git tag v1.0
+git push origin v1.0
+```
+
+Eso dispara el CD con los tres jobs y publica las imágenes `:v1.0`, que son las que usa `docker-compose.deploy.yml` por defecto (ver [Opción 3](#opción-3-versión-desplegada-sin-compilar)).
 
 ## Documentación adicional
 

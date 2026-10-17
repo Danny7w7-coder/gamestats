@@ -1,0 +1,59 @@
+# GameStats: versión desplegada. Igual que docker-compose.yml, pero en lugar de
+# compilar el código descarga las imágenes ya publicadas por el CD en GitHub
+# Container Registry. Solo hace falta Docker (no Java, sbt ni Go).
+#
+#   docker compose -f docker-compose.deploy.yml up -d --wait          # analytics + ingestion
+#   docker compose -f docker-compose.deploy.yml run --rm simulator    # partidas de prueba
+#   docker compose -f docker-compose.deploy.yml down                  # apagar
+#
+# La versión se elige con GAMESTATS_TAG (por defecto v1.0, la de la entrega).
+# Las imágenes sirven para amd64 y arm64 (por ejemplo, una Mac con chip Apple).
+
+services:
+  # Análisis y estadísticas (Scala).
+  analytics:
+    image: ghcr.io/danny7w7-coder/gamestats-analytics:${GAMESTATS_TAG:-v1.0}
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      RESULTS_DIR: "/data"
+    volumes:
+      - analytics-results:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 20 # la JVM tarda unos segundos en arrancar
+
+  # Ingestión, validación y envío a Scala (Go).
+  ingestion:
+    image: ghcr.io/danny7w7-coder/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      SCALA_URL: "http://analytics:8081"
+      WORKERS: "4"
+    depends_on:
+      analytics:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  # Simulador de partidas (Go): misma imagen que ingestion, otro programa.
+  # Solo corre a pedido (perfil "sim").
+  simulator:
+    image: ghcr.io/danny7w7-coder/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
+    profiles: ["sim"]
+    entrypoint: ["/app/simulator"]
+    command: ["-target", "http://ingestion:8080", "-seed", "42"]
+    depends_on:
+      ingestion:
+        condition: service_healthy
+
+volumes:
+  analytics-results:
