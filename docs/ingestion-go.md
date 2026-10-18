@@ -374,7 +374,7 @@ Scala descarta los eventos que rompen una validación de contexto. El simulador 
 
 Los tests del simulador (`simulator_test.go`) vuelven a revisar todas estas reglas en 50 semillas distintas. En connect4, el test reconstruye el tablero con su propio código de 4 en línea, independiente de `c4Game`. También comprueban que las partidas aleatorias de cada juego usan **todas** las acciones de su catálogo.
 
-Contra el Scala real, `go run ./cmd/simulator -seed 42` manda 30 partidas y 2208 eventos: Go rechaza los 54 dañados a propósito y Scala no descarta ninguno de los demás.
+Contra el Scala real, `go run ./cmd/simulator -seed 42` manda 30 partidas y 2538 eventos: Go rechaza los 57 dañados a propósito y Scala no descarta ninguno de los demás.
 
 ### Escenarios guionizados
 
