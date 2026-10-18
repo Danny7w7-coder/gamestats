@@ -181,9 +181,10 @@ func playRound(r *rand.Rand, g *fightGame) {
 		}
 
 		if g.health[rival] <= 0 {
-			// Doble KO: a veces el rival contesta a la vez y deja en 0 al que
-			// tenía poca vida. El round queda empatado.
-			if g.health[p] <= 15 && r.Intn(100) < 35 {
+			// Doble KO: a veces (10 %) el rival contesta a la vez y deja en 0 al
+			// que tenía poca vida. El round queda empatado. Es raro a propósito:
+			// con más empates, muchas peleas terminan sin ganador.
+			if g.health[p] <= 15 && r.Intn(100) < 10 {
 				g.attack(rival, pick(r, moves), g.health[p])
 				g.roundDraw(pick(r, []string{"p1", "p2"}), "double_ko")
 				return
