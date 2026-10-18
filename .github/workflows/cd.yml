@@ -42,7 +42,7 @@ jobs:
             [ "$count" -ge "$expected" ] && break
             sleep 2
           done
-          test "$count" -gt 0
+          test "$count" -ge "$expected"
           curl -fs http://localhost:8081/results \
             | jq -r '.[] | "\(.matchId)\t\(.matchStats.winner)\t\([.patterns[].rule] | join(","))"'
 
