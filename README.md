@@ -251,11 +251,7 @@ No se implementan los videojuegos: el simulador (`ingestion-go/cmd/simulator`) h
 | `tetris-s42-b2b` | Dos tetris seguidos (con `HOLD`) y subida al nivel 2 | `BACK_TO_BACK` |
 | `tetris-s42-perfect` | 3 T-spins y un tetris que deja el tablero vacío, con pausa | `PERFECT_CLEAR`, `T_SPIN_MASTER` |
 
-Cada escenario se puede ver en `http://localhost:8081/results/<escenario>`. Se pueden cambiar las opciones del simulador agregándolas al final del comando, por ejemplo:
-
-```bash
-docker run --rm --network gamestats --entrypoint /app/simulator ghcr.io/danny7w7-coder/gamestats-ingestion:v1.0 -target http://ingestion:8080 -racing 10 -fighting 10 -connect4 10 -tetris 10 -seed 7
-```
+Cada escenario se puede ver en `http://localhost:8081/results/<escenario>`.
 
 El detalle del simulador está en [`docs/ingestion-go.md`](docs/ingestion-go.md).
 
