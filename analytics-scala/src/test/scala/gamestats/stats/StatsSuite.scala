@@ -36,9 +36,13 @@ class StatsSuite extends munit.FunSuite:
       playerId = Some("p1"), action = Some(UnknownAction("DANCE", ujson.Obj())))
     assertEquals(GenericStats.eventsByAction(dance :: b.events).get("DANCE"), Some(1))
 
-  test("gameId desconocido devuelve Left"):
+  test("v1.1: un gameId sin analyzer propio se analiza con las estadísticas genéricas"):
     val b = load("racing_match_ok.json").copy(gameId = "chess")
-    assertEquals(Analyzer.analyze(b), Left("no hay analyzer para gameId 'chess'"))
+    val a = Analyzer.analyze(b).fold(fail(_), identity)
+    assertEquals(a.gameId, "chess")
+    assertEquals(a.matchStats, GenericStats.matchStats(b))
+    assertEquals(a.playerStats, Nil)
+    assertEquals(a.patterns, Nil)
 
   test("los cuatro juegos del contrato tienen analyzer"):
     for name <- List("racing_match_ok.json", "fighting_match_ok.json", "connect4_match_ok.json", "tetris_match_ok.json") do

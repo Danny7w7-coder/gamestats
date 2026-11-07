@@ -205,7 +205,7 @@ Un evento que falla se descarta (con su motivo en el log) y el resto de la parti
 
 Una **acción nueva** de un juego que ya existe no necesita cambios: Go la acepta con un aviso y Scala la guarda como `UnknownAction`, la cuenta en `eventsByAction` y analiza el resto de la partida igual. Por eso una partida con una acción que salió del contrato (por ejemplo `ITEM_PICKUP`, de cuando racing tenía objetos) se sigue leyendo sin error.
 
-Un **juego nuevo** tampoco obliga a reescribir el sistema:
+Un **juego nuevo** tampoco obliga a reescribir el sistema. Desde la v1.1, Scala acepta **cualquier `gameId`**: si el juego no tiene analizador propio, la partida se analiza con las estadísticas genéricas (duración, eventos, eventos por acción). Para darle métricas y patrones propios:
 
 - **Go**: agregar el juego y sus acciones al catálogo (`ingestion-go/internal/validation/catalog.go`).
 - **Scala**: agregar sus acciones al modelo (`model/Event.scala`) y su lectura con rangos (`Codecs.parseAction`); un analizador nuevo (`XAnalyzer`) con sus métricas y reglas; si tiene reglas de contexto, un `ContextCheck` propio (`validation/`); y registrarlo en `Analyzer.registry`. Las estadísticas genéricas (duración, eventos por acción, jugadores) y las validaciones comunes (pausa, referencias a otros jugadores) funcionan sin cambios.
@@ -222,6 +222,7 @@ Un **juego nuevo** tampoco obliga a reescribir el sistema:
 | **Tetris** | Puntaje, líneas, tetris (4 líneas de una vez), piezas colocadas, piezas por minuto, nivel máximo, combo máximo, T-spins, hard drops | Duración, eventos por acción (sin ganador) | `BACK_TO_BACK`: dos tetris seguidos · `PERFECT_CLEAR`: tablero vacío · `T_SPIN_MASTER`: 3 T-spins o más |
 
 - **Estadística por jugador en todas sus partidas**: `/players/{playerId}` junta las métricas y los patrones de un jugador en cualquier juego.
+- **Estadísticas por juego y generales (v1.1)**: `/stats/games/{gameId}` y `/stats/overview` acumulan todas las partidas guardadas (las usa el panel de GameConsole). Se calculan en `stats/Summaries.scala` con funciones puras sobre los mismos resultados de `/results`.
 - **Estadísticas que combinan tipos de eventos**: el tiempo efectivo (vueltas + penalizaciones), `CLEAN_RACE` (choques + penalizaciones) y las amenazas tapadas (amenazas + fichas).
 - **Patrones por secuencia**: todas las reglas recorren los eventos en orden. Por ejemplo, `COMEBACK` sigue la línea de tiempo de posiciones del ganador y `BACK_TO_BACK` mira limpiezas de líneas consecutivas.
 - En connect4, las reglas de contexto y los patrones trabajan sobre el tablero reconstruido evento a evento: el estado de la validación es el tablero, y `UNDO` simplemente vuelve al tablero anterior (los tableros son inmutables, así que basta con guardarlos en una pila).
@@ -342,6 +343,8 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 | `GET` | `/results` | Todos los resultados guardados |
 | `GET` | `/results/{matchId}` | El resultado de una partida (`404` si no existe) |
 | `GET` | `/players/{playerId}` | Estadísticas de un jugador en todas sus partidas, de cualquier juego (`404` si no jugó) |
+| `GET` | `/stats/overview` | **v1.1.** Totales de todas las partidas (partidas, jugadores, eventos, duración promedio, ganadores y patrones más frecuentes) y un resumen por juego |
+| `GET` | `/stats/games/{gameId}` | **v1.1.** Un juego: partidas terminadas, jugadores, promedios, partidas sin ganador, ranking de ganadores, promedio/mínimo/máximo de cada métrica, acciones y patrones. Un juego sin partidas responde todo en `0` |
 
 Quién valida qué (Go o Scala) y cuándo un lote se rechaza está detallado en [`contracts/README.md`](contracts/README.md#quién-valida-qué).
 

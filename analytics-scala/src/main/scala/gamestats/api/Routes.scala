@@ -2,7 +2,7 @@ package gamestats.api
 
 import gamestats.json.Codecs
 import gamestats.model.{MatchAnalysis, MatchBatch, PlayerStats}
-import gamestats.stats.Analyzer
+import gamestats.stats.{Analyzer, Summaries}
 import gamestats.storage.ResultStore
 
 /** Endpoints HTTP. Junto con `storage/` es la única capa con efectos: la lógica
@@ -44,6 +44,16 @@ case class AnalyticsRoutes(store: ResultStore)(using cc: castor.Context, log: ca
     AnalyticsRoutes.playerReport(playerId, store.all) match
       case Some(report) => cask.Response(report, statusCode = 200)
       case None         => AnalyticsRoutes.error(404, s"el jugador '$playerId' no aparece en ninguna partida")
+
+  /** v1.1: totales de todas las partidas y un resumen por juego (para el panel). */
+  @cask.get("/stats/overview")
+  def statsOverview(): ujson.Value = Codecs.encodeOverview(Summaries.overview(store.all))
+
+  /** v1.1: estadísticas de un juego. Un juego sin partidas responde 200 con todo
+    * en cero (el panel muestra los juegos registrados aunque nadie haya terminado una).
+    */
+  @cask.get("/stats/games/:gameId")
+  def statsGame(gameId: String): ujson.Value = Codecs.encodeGameSummary(Summaries.game(gameId, store.all))
 
   initialize()
 

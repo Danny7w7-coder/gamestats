@@ -217,6 +217,38 @@ object Codecs:
   def encodeMetrics(metrics: Map[String, Double]): ujson.Value =
     sortedObj(metrics)(ujson.Num(_))
 
+  // v1.1: estadísticas acumuladas (GET /stats/...)
+
+  def encodeGameSummary(g: GameSummary): ujson.Value =
+    ujson.Obj(
+      "gameId"               -> g.gameId,
+      "matches"              -> ujson.Num(g.matches),
+      "players"              -> ujson.Num(g.players),
+      "totalEvents"          -> ujson.Num(g.totalEvents),
+      "avgDurationSeconds"   -> ujson.Num(g.avgDurationSeconds),
+      "avgEventsPerMatch"    -> ujson.Num(g.avgEventsPerMatch),
+      "matchesWithoutWinner" -> ujson.Num(g.matchesWithoutWinner),
+      "winners"              -> encodeRanked(g.winners, "playerId", "wins"),
+      "metrics"              -> sortedObj(g.metrics)(m => ujson.Obj("avg" -> m.avg, "min" -> m.min, "max" -> m.max)),
+      "actions"              -> sortedObj(g.actions)(n => ujson.Num(n)),
+      "patterns"             -> encodeRanked(g.patterns, "rule", "count")
+    )
+
+  def encodeOverview(o: Overview): ujson.Value =
+    ujson.Obj(
+      "matches"            -> ujson.Num(o.matches),
+      "players"            -> ujson.Num(o.players),
+      "totalEvents"        -> ujson.Num(o.totalEvents),
+      "avgDurationSeconds" -> ujson.Num(o.avgDurationSeconds),
+      "games"              -> ujson.Arr.from(o.games.map(encodeGameSummary)),
+      "topWinners"         -> encodeRanked(o.topWinners, "playerId", "wins"),
+      "topPatterns"        -> encodeRanked(o.topPatterns, "rule", "count")
+    )
+
+  /** Lista de Ranked con los nombres de campo que correspondan ("playerId"/"wins", "rule"/"count"). */
+  private def encodeRanked(rs: List[Ranked], nameField: String, countField: String): ujson.Value =
+    ujson.Arr.from(rs.map(r => ujson.Obj(nameField -> r.name, countField -> ujson.Num(r.count))))
+
   /** Map -> objeto JSON con las claves ordenadas, para que la salida sea estable. */
   private def sortedObj[A](m: Map[String, A])(f: A => ujson.Value): ujson.Value =
     ujson.Obj.from(m.toList.sortBy(_._1).map((k, v) => k -> f(v)))

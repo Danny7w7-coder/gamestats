@@ -8,7 +8,7 @@
   "properties": {
     "eventId":     { "type": "string", "minLength": 1 },
     "timestamp":   { "type": "string", "format": "date-time", "description": "RFC3339. El orden de los eventos se toma siempre de aquí." },
-    "gameId":      { "enum": ["racing", "fighting", "connect4", "tetris"] },
+    "gameId":      { "type": "string", "pattern": "^[a-z0-9-]{1,40}$", "description": "v1.1: abierto. racing, fighting, connect4 y tetris tienen acciones y análisis propios; cualquier otro gameId se acepta y se analiza con las estadísticas genéricas." },
     "gameVersion": { "type": "string", "minLength": 1 },
     "matchId":     { "type": "string", "minLength": 1 },
     "playerId":    { "type": "string", "minLength": 1 },

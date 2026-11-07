@@ -18,9 +18,12 @@ class RoutesSuite extends munit.FunSuite:
   test("analyzeBody rechaza un lote sin matchId"):
     assertEquals(AnalyticsRoutes.analyzeBody(Fixtures.text("invalid_missing_matchid.json")), Left("falta 'matchId'"))
 
-  test("analyzeBody rechaza un juego sin analyzer"):
+  test("v1.1: analyzeBody acepta un juego sin analyzer propio (estadísticas genéricas)"):
     val body = Fixtures.text("racing_match_ok.json").replace("\"racing\"", "\"chess\"")
-    assertEquals(AnalyticsRoutes.analyzeBody(body), Left("no hay analyzer para gameId 'chess'"))
+    val a = AnalyticsRoutes.analyzeBody(body).fold(fail(_), identity)
+    assertEquals(a.gameId, "chess")
+    assertEquals(a.matchStats.totalEvents, 17)
+    assertEquals(a.matchStats.winner, None)
 
   test("una vuelta con data rota se descarta y la carrera se analiza igual"):
     // Se rompe lapTimeMs de la 3ra vuelta de p1 (80900 -> "rápido").
