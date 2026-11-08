@@ -229,9 +229,10 @@ object Codecs:
       "avgEventsPerMatch"    -> ujson.Num(g.avgEventsPerMatch),
       "matchesWithoutWinner" -> ujson.Num(g.matchesWithoutWinner),
       "winners"              -> encodeRanked(g.winners, "playerId", "wins"),
-      "metrics"              -> sortedObj(g.metrics)(m => ujson.Obj("avg" -> m.avg, "min" -> m.min, "max" -> m.max)),
+      "metrics"              -> sortedObj(g.metrics)(encodeMetricSummary),
       "actions"              -> sortedObj(g.actions)(n => ujson.Num(n)),
-      "patterns"             -> encodeRanked(g.patterns, "rule", "count")
+      "patterns"             -> encodeRanked(g.patterns, "rule", "count"),
+      "standings"            -> ujson.Arr.from(g.standings.map(encodeStanding))
     )
 
   def encodeOverview(o: Overview): ujson.Value =
@@ -242,8 +243,23 @@ object Codecs:
       "avgDurationSeconds" -> ujson.Num(o.avgDurationSeconds),
       "games"              -> ujson.Arr.from(o.games.map(encodeGameSummary)),
       "topWinners"         -> encodeRanked(o.topWinners, "playerId", "wins"),
-      "topPatterns"        -> encodeRanked(o.topPatterns, "rule", "count")
+      "topPatterns"        -> encodeRanked(o.topPatterns, "rule", "count"),
+      "standings"          -> ujson.Arr.from(o.standings.map(encodeStanding))
     )
+
+  def encodeStanding(s: Standing): ujson.Value =
+    ujson.Obj(
+      "playerId" -> s.playerId,
+      "played"   -> ujson.Num(s.played),
+      "wins"     -> ujson.Num(s.wins),
+      "losses"   -> ujson.Num(s.losses),
+      "noResult" -> ujson.Num(s.noResult),
+      "winRate"  -> ujson.Num(s.winRate),
+      "metrics"  -> sortedObj(s.metrics)(encodeMetricSummary)
+    )
+
+  private def encodeMetricSummary(m: MetricSummary): ujson.Value =
+    ujson.Obj("avg" -> m.avg, "min" -> m.min, "max" -> m.max)
 
   /** Lista de Ranked con los nombres de campo que correspondan ("playerId"/"wins", "rule"/"count"). */
   private def encodeRanked(rs: List[Ranked], nameField: String, countField: String): ujson.Value =

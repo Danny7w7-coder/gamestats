@@ -343,8 +343,8 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 | `GET` | `/results` | Todos los resultados guardados |
 | `GET` | `/results/{matchId}` | El resultado de una partida (`404` si no existe) |
 | `GET` | `/players/{playerId}` | Estadísticas de un jugador en todas sus partidas, de cualquier juego (`404` si no jugó) |
-| `GET` | `/stats/overview` | **v1.1.** Totales de todas las partidas (partidas, jugadores, eventos, duración promedio, ganadores y patrones más frecuentes) y un resumen por juego |
-| `GET` | `/stats/games/{gameId}` | **v1.1.** Un juego: partidas terminadas, jugadores, promedios, partidas sin ganador, ranking de ganadores, promedio/mínimo/máximo de cada métrica, acciones y patrones. Un juego sin partidas responde todo en `0` |
+| `GET` | `/stats/overview` | **v1.1.** Totales de todas las partidas (partidas, jugadores, eventos, duración promedio, ganadores y patrones más frecuentes), la clasificación general (`standings`) y un resumen por juego |
+| `GET` | `/stats/games/{gameId}` | **v1.1.** Un juego: partidas terminadas, jugadores, promedios, partidas sin ganador, ranking de ganadores, promedio/mínimo/máximo de cada métrica, acciones, patrones y clasificación (`standings`: por jugador, partidas, ganadas, perdidas, sin ganador, % de victorias y sus métricas). Un juego sin partidas responde todo en `0` |
 
 Quién valida qué (Go o Scala) y cuándo un lote se rechaza está detallado en [`contracts/README.md`](contracts/README.md#quién-valida-qué).
 

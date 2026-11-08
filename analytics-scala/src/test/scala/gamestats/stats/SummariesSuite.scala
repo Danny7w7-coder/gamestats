@@ -67,6 +67,30 @@ class SummariesSuite extends munit.FunSuite:
     val o = Summaries.overview(Nil)
     assertEquals((o.matches, o.games, o.avgDurationSeconds), (0, Nil, 0.0))
 
+  test("standings: partidas, ganadas, perdidas y porcentaje de cada jugador del juego"):
+    val s = Summaries.game("connect4", all).standings
+    // cpu: 3 partidas, ganó 2 (c4-2, c4-3) y perdió 1 (c4-1)
+    assertEquals(s.map(_.playerId), List("cpu", "ana", "beto"))
+    val cpu = s.head
+    assertEquals((cpu.played, cpu.wins, cpu.losses, cpu.noResult, cpu.winRate), (3, 2, 1, 0, 0.67))
+    assertEquals(cpu.metrics("discs"), MetricSummary(9.67, 4.0, 16.0))
+    val beto = s.last
+    assertEquals((beto.played, beto.wins, beto.losses, beto.winRate), (1, 0, 1, 0.0))
+
+  test("standings general: suma juegos, cuenta las partidas sin ganador y no mezcla métricas"):
+    val ana = Summaries.overview(all).standings.find(_.playerId == "ana").get
+    // ana: c4-1 ganó, c4-2 perdió, t-1 (tetris) sin ganador
+    assertEquals((ana.played, ana.wins, ana.losses, ana.noResult, ana.winRate), (3, 1, 1, 1, 0.33))
+    assertEquals(ana.metrics, Map.empty)
+
+  test("standings: con las mismas victorias, va primero el de mejor porcentaje"):
+    val ms = List(
+      m("a", "connect4", 10, 5, Some("x"), List("x" -> Map(), "y" -> Map())),
+      m("b", "connect4", 10, 5, Some("y"), List("x" -> Map(), "y" -> Map())),
+      m("c", "connect4", 10, 5, Some("z"), List("y" -> Map(), "z" -> Map())))
+    // x: 1/2, y: 1/3, z: 1/1
+    assertEquals(Summaries.standings(ms, withMetrics = false).map(_.playerId), List("z", "x", "y"))
+
   test("rank desempata por nombre"):
     assertEquals(Summaries.rank(List("b", "a", "b", "c", "a")), List(Ranked("a", 2), Ranked("b", 2), Ranked("c", 1)))
 
@@ -88,6 +112,10 @@ class SummariesSuite extends munit.FunSuite:
     assertEquals(json("winners")(0)("wins").num, 2.0)
     assertEquals(json("metrics")("discs")("max").num, 16.0)
     assertEquals(json("patterns")(0)("rule").str, "QUICK_WIN")
+    val first = json("standings")(0)
+    assertEquals((first("playerId").str, first("played").num, first("wins").num, first("losses").num), ("cpu", 3.0, 2.0, 1.0))
+    assertEquals(first("winRate").num, 0.67)
+    assertEquals(first("metrics")("discs")("avg").num, 9.67)
 
   test("encode: forma del JSON de /stats/overview"):
     val json = Codecs.encodeOverview(Summaries.overview(all))
