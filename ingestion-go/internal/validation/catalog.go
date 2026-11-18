@@ -1,9 +1,12 @@
 // Package validation decide si un evento es válido antes de procesarlo.
 package validation
 
-// GameActions es el ÚNICO lugar donde se declaran los juegos y sus acciones.
-// Para agregar un juego nuevo basta con agregar una entrada aquí: el resto del
-// sistema (validación, pipeline, envío a Scala) no cambia.
+// GameActions es el catálogo de los juegos CONOCIDOS y sus acciones. No es la
+// lista de juegos permitidos: cualquier gameId con formato válido
+// (^[a-z0-9-]{1,40}$) se acepta. Los juegos de este catálogo tienen validación
+// estricta de acciones; los demás solo tienen las reglas genéricas.
+// Para dar validación estricta a un juego nuevo basta con agregar una entrada
+// aquí: el resto del sistema (pipeline, envío a Scala) no cambia.
 //
 // Las acciones salen del contrato compartido con Scala (contracts/README.md).
 // Los nombres no se repiten entre juegos.

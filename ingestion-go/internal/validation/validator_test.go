@@ -47,11 +47,20 @@ func TestValidate(t *testing.T) {
 		{"r2 inválido: texto libre", func(e *model.Event) { e.Timestamp = "ayer a las 2" }, "RFC 3339"},
 		{"r2 inválido: sin zona horaria", func(e *model.Event) { e.Timestamp = "2026-10-05T14:01:22" }, "RFC 3339"},
 
-		// Regla 3: gameId en el catálogo.
+		// Regla 3: formato del gameId (^[a-z0-9-]{1,40}$).
 		{"r3 válido: connect4", func(e *model.Event) { e.GameID = "connect4"; e.Action = "DISC_DROPPED" }, ""},
 		{"r3 válido: fighting", func(e *model.Event) { e.GameID = "fighting"; e.Action = "COMBO" }, ""},
 		{"r3 válido: tetris", func(e *model.Event) { e.GameID = "tetris"; e.Action = "T_SPIN" }, ""},
-		{"r3 inválido: juego desconocido", func(e *model.Event) { e.GameID = "chess" }, "gameId desconocido"},
+		{"r3 válido: gameId desconocido con formato válido", func(e *model.Event) { e.GameID = "chess" }, ""},
+		{"r3 válido: gameId con guiones y dígitos", func(e *model.Event) { e.GameID = "my-game-2" }, ""},
+		{"r3 válido: 40 caracteres", func(e *model.Event) { e.GameID = strings.Repeat("a", 40) }, ""},
+		{"r3 inválido: mayúsculas", func(e *model.Event) { e.GameID = "Chess" }, "gameId con formato inválido"},
+		{"r3 inválido: espacio", func(e *model.Event) { e.GameID = "my game" }, "gameId con formato inválido"},
+		{"r3 inválido: guion bajo", func(e *model.Event) { e.GameID = "my_game" }, "gameId con formato inválido"},
+		{"r3 inválido: signo", func(e *model.Event) { e.GameID = "chess!" }, "gameId con formato inválido"},
+		{"r3 inválido: 41 caracteres", func(e *model.Event) { e.GameID = strings.Repeat("a", 41) }, "gameId con formato inválido"},
+		{"r3 inválido: salto de línea final", func(e *model.Event) { e.GameID = "chess\n" }, "gameId con formato inválido"},
+		{"r3 inválido: acentos", func(e *model.Event) { e.GameID = "ajedréz" }, "gameId con formato inválido"},
 
 		// Regla 4: type válido.
 		{"r4 válido: PLAYER_JOINED", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
@@ -78,10 +87,16 @@ func TestValidate(t *testing.T) {
 		{"r6 inválido: LAP_COMPLETED en tetris", func(e *model.Event) { e.GameID = "tetris" }, `la acción "LAP_COMPLETED" no existe en el juego "tetris"`},
 		{"r6 válido: acción que no existe en ningún juego (desconocida)", func(e *model.Event) { e.Action = "JUMP" }, ""},
 
+		// Regla 6 en un juego desconocido: solo la regla genérica.
+		{"r6 válido: juego desconocido, acción cualquiera", func(e *model.Event) { e.GameID = "chess"; e.Action = "CASTLE" }, ""},
+		{"r6 válido: juego desconocido, acción de otro juego", func(e *model.Event) { e.GameID = "chess"; e.Action = "CONNECT_FOUR" }, ""},
+		{"r6 inválido: juego desconocido, sin action", func(e *model.Event) { e.GameID = "chess"; e.Action = "" }, "falta el campo action"},
+
 		// Regla 7: action solo en PLAYER_ACTION.
 		{"r7 válido: PLAYER_JOINED sin action", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, ""},
 		{"r7 inválido: MATCH_STARTED con action", func(e *model.Event) { e.Type = "MATCH_STARTED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
 		{"r7 inválido: MATCH_PAUSED con action", func(e *model.Event) { e.Type = "MATCH_PAUSED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
+		{"r7 inválido: juego desconocido, MATCH_STARTED con action", func(e *model.Event) { e.GameID = "chess"; e.Type = "MATCH_STARTED"; e.PlayerID = "" }, "action solo se permite en PLAYER_ACTION"},
 	}
 
 	for _, tt := range tests {
@@ -168,7 +183,7 @@ func TestValidateContractFixtures(t *testing.T) {
 }
 
 // UnknownAction solo marca acciones de PLAYER_ACTION que no están en el
-// catálogo del juego. Las del catálogo y los eventos sin acción no son avisos.
+// catálogo de un juego conocido. Las del catálogo y los eventos sin acción no son avisos.
 func TestUnknownAction(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -178,6 +193,7 @@ func TestUnknownAction(t *testing.T) {
 		{"acción del catálogo", func(e *model.Event) {}, false},
 		{"acción nueva", func(e *model.Event) { e.Action = "BOOST_JUMP" }, true},
 		{"evento sin acción", func(e *model.Event) { e.Type = "PLAYER_JOINED"; e.Action = "" }, false},
+		{"juego desconocido: nunca es aviso", func(e *model.Event) { e.GameID = "chess"; e.Action = "CASTLE" }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
