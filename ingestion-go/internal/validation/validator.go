@@ -39,6 +39,11 @@ var eventTypes = map[string]bool{
 // mientras cumplan este formato.
 var gameIDPattern = regexp.MustCompile(`^[a-z0-9-]{1,40}$`)
 
+// ValidGameID dice si gameID tiene el formato permitido (^[a-z0-9-]{1,40}$).
+func ValidGameID(gameID string) bool {
+	return gameIDPattern.MatchString(gameID)
+}
+
 // matchTypes son los eventos de la partida completa (no de un jugador): son
 // los únicos que pueden venir sin playerId.
 var matchTypes = map[string]bool{
@@ -78,7 +83,7 @@ func Validate(e model.Event) error {
 	// Regla 3: el gameId tiene formato válido. Cualquier juego con ese
 	// formato se acepta; solo los del catálogo (GameActions) tienen además
 	// validación estricta de acciones.
-	if !gameIDPattern.MatchString(e.GameID) {
+	if !ValidGameID(e.GameID) {
 		return fmt.Errorf("gameId con formato inválido: %q (se espera %s)", e.GameID, gameIDPattern)
 	}
 	actions, known := GameActions[e.GameID]

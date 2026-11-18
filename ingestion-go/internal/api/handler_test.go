@@ -35,7 +35,7 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 		t.Fatal(err)
 	}
 	store := state.NewMatchStore()
-	d := pipeline.New(store, time.Hour)
+	d := pipeline.New(store, pipeline.Uniform(time.Hour))
 	// Alguien tiene que leer los lotes terminados; aquí solo se descartan.
 	go func() {
 		for range d.Out() {

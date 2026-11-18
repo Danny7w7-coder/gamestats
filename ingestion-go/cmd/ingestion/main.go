@@ -41,7 +41,8 @@ func main() {
 	defer unknownLog.Close()
 
 	store := state.NewMatchStore()
-	dispatcher := pipeline.New(store, cfg.IdleTimeout)
+	timeouts := pipeline.IdleTimeouts{Default: cfg.IdleTimeout, PerGame: cfg.GameIdleTimeouts}
+	dispatcher := pipeline.New(store, timeouts)
 
 	// WORKERS senders leen los lotes terminados y los envían a Scala.
 	// El WaitGroup permite esperar, al apagar, a que terminen de enviar.
@@ -69,8 +70,12 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("servidor de ingestión escuchando en %s (SCALA_URL=%s, WORKERS=%d, IDLE_TIMEOUT=%s)",
-			srv.Addr, cfg.ScalaURL, cfg.Workers, cfg.IdleTimeout)
+		log.Printf("servidor de ingestión escuchando en %s (SCALA_URL=%s, WORKERS=%d)",
+			srv.Addr, cfg.ScalaURL, cfg.Workers)
+		log.Print("timeouts de inactividad por juego (IDLE_TIMEOUT, IDLE_TIMEOUT_BY_GAME):")
+		for _, line := range timeouts.Table() {
+			log.Print("  " + line)
+		}
 		// Al apagar, ListenAndServe devuelve ErrServerClosed: no es un error.
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
