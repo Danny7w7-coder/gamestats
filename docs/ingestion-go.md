@@ -34,7 +34,7 @@ Solo usa la librería estándar de Go (`net/http`, `encoding/json`, `sync`, `sor
 
 ## Juegos
 
-GameStats trabaja con 4 juegos:
+GameStats tiene 4 juegos **conocidos**, con sus acciones declaradas y validación estricta en Go:
 
 | `gameId` | Qué es | Acciones (`PLAYER_ACTION`) | Eventos en total |
 |---|---|---|---|
@@ -43,9 +43,28 @@ GameStats trabaja con 4 juegos:
 | `connect4` | 4 en línea, entre dos personas o contra la IA | `DISC_DROPPED`, `THREAT_CREATED`, `THREAT_BLOCKED`, `CONNECT_FOUR`, `TURN_TIMEOUT`, `UNDO`, `HINT_USED` (7) | 15 |
 | `tetris` | Tetris clásico de un jugador | `PIECE_SPAWNED`, `PIECE_MOVED`, `PIECE_ROTATED`, `SOFT_DROP`, `HARD_DROP`, `HOLD`, `PIECE_PLACED`, `LINES_CLEARED`, `T_SPIN`, `ALL_CLEAR`, `LEVEL_UP`, `STACK_HEIGHT`, `TOP_OUT` (13) | 21 |
 
-Además de sus acciones, los 4 juegos comparten 8 tipos generales: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED` y `PLAYER_RECONNECTED`. En total son 42 eventos distintos (8 generales y 34 acciones), y ninguna acción se repite entre juegos.
+Además de sus acciones, todos los juegos comparten 8 tipos generales: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED`, `MATCH_RESUMED`, `PLAYER_JOINED`, `PLAYER_LEFT`, `PLAYER_DISCONNECTED` y `PLAYER_RECONNECTED`. En total son 42 eventos distintos (8 generales y 34 acciones), y ninguna acción se repite entre juegos.
 
-El catálogo lo define el contrato compartido con Scala ([`contracts/README.md`](../contracts/README.md)). El `data` exacto de cada acción está en `contracts/event.schema.json`. En Go, los juegos y sus acciones se declaran en un solo lugar: `GameActions`, en `internal/validation/catalog.go`.
+El catálogo lo define el contrato compartido con Scala ([`contracts/README.md`](../contracts/README.md)). El `data` exacto de cada acción está en `contracts/event.schema.json`. En Go, los juegos conocidos y sus acciones se declaran en un solo lugar: `GameActions`, en `internal/validation/catalog.go`.
+
+### `gameId` abierto
+
+El catálogo **no** es la lista de juegos permitidos. Go acepta cualquier `gameId` que cumpla este formato:
+
+```
+^[a-z0-9-]{1,40}$
+```
+
+Es decir, de 1 a 40 caracteres entre minúsculas, dígitos y guiones. Se rechazan las mayúsculas, los espacios, el guion bajo, los acentos y los signos (`Chess`, `my game`, `my_game`, `ajedréz` y `chess!` no pasan; `chess`, `my-game-2` y `tetris` sí).
+
+Cómo se trata cada `gameId` válido:
+
+| `gameId` | Validación de `action` en `PLAYER_ACTION` | Aviso de acción desconocida |
+|---|---|---|
+| Conocido (`racing`, `fighting`, `connect4`, `tetris`) | **Estricta:** se rechaza una acción de **otro** juego del catálogo; una acción que no existe en ningún juego se acepta con aviso | Sí |
+| Desconocido (por ejemplo `chess`) | **Genérica:** solo se exige que `action` no venga vacía; cualquier acción se acepta, incluso una que en el catálogo es de otro juego | No |
+
+Las demás reglas (campos obligatorios, `timestamp`, `type`, `playerId` y `action` solo en `PLAYER_ACTION`) valen para todos los juegos.
 
 ## Cómo correrlo
 
@@ -75,12 +94,44 @@ Se leen al arrancar (`internal/config/config.go`). Si una variable viene vacía 
 | `PORT` | `8080` | Puerto HTTP del servidor |
 | `SCALA_URL` | `http://localhost:8081` | Dirección del servicio de Scala (en Docker: `http://analytics:8081`) |
 | `WORKERS` | `4` | Cuántas goroutines envían lotes a Scala en paralelo |
-| `IDLE_TIMEOUT` | `2m` | Tiempo sin eventos tras el cual una partida se marca como `abandonada` (formato de Go: `30s`, `2m`, `1h`) |
+| `IDLE_TIMEOUT` | `2m` | Tiempo sin eventos tras el cual se marca como `abandonada` una partida de un juego **sin timeout propio** (formato de Go: `30s`, `2m`, `1h`) |
+| `IDLE_TIMEOUT_BY_GAME` | *(vacía)* | Timeout de inactividad por juego, para reemplazar o ampliar los valores por defecto de la tabla de abajo. Formato: `juego=duración,juego=duración` |
 
 Ejemplo en PowerShell:
 
 ```powershell
 $env:PORT="9090"; $env:WORKERS="2"; go run ./cmd/ingestion
+```
+
+#### Tiempo de espera por juego
+
+Cada juego tiene su propio tiempo de inactividad: en tetris un jugador que no manda eventos por un minuto casi seguro se fue, pero en connect4 un turno largo es normal. Valores por defecto:
+
+| Juego | Timeout por defecto | De dónde sale |
+|---|---|---|
+| `tetris` | `1m` | Valor propio |
+| `fighting` | `2m` | Valor propio |
+| `connect4` | `15m` | Valor propio |
+| Cualquier otro (`racing`, `chess`, ...) | `2m` | `IDLE_TIMEOUT` |
+
+`IDLE_TIMEOUT` solo cambia la última fila ("el resto"): no mueve los tres juegos con valor propio. Para cambiar uno de ellos, o darle un valor a un juego nuevo, se usa `IDLE_TIMEOUT_BY_GAME`:
+
+```powershell
+$env:IDLE_TIMEOUT_BY_GAME="tetris=30s,connect4=20m,chess=5m"; go run ./cmd/ingestion
+```
+
+- Cada entrada es `gameId=duración`, separadas por comas. Se toleran espacios alrededor. Lo que se pide reemplaza el valor por defecto de ese juego; los demás no cambian.
+- El `gameId` debe cumplir el mismo formato de siempre (`^[a-z0-9-]{1,40}$`) y la duración debe ser positiva.
+- Si el formato es inválido, el servidor **no arranca** y dice qué entrada falló, por ejemplo `IDLE_TIMEOUT_BY_GAME: la duración "abc" de "tetris" debe ser positiva (ej. 30s, 2m, 1h)`. Se rechazan las entradas sin `=`, los `gameId` con formato inválido, las duraciones que no son positivas, los juegos repetidos y las comas de más.
+- Al arrancar, el servidor imprime la tabla de timeouts que quedó en uso:
+
+```
+timeouts de inactividad por juego (IDLE_TIMEOUT, IDLE_TIMEOUT_BY_GAME):
+  chess    5m0s
+  connect4 15m0s
+  fighting 2m0s
+  tetris   30s
+  (resto)  2m0s
 ```
 
 ## Endpoints
@@ -90,6 +141,7 @@ $env:PORT="9090"; $env:WORKERS="2"; go run ./cmd/ingestion
 | `GET /health` | Responde `{"status":"ok"}` |
 | `POST /events` | Recibe uno o varios eventos, valida cada uno y manda los válidos al pipeline |
 | `GET /matches` | Estado de todas las partidas |
+| `GET /games` | Partidas en curso por juego |
 
 Las rutas se registran con método (`"POST /events"`, disponible desde Go 1.22), así que otro método recibe `405` automáticamente.
 
@@ -137,10 +189,22 @@ Estados de una partida:
 ```
 en_curso ──MATCH_FINISHED──▶ terminada ──Scala responde 2xx──▶ enviada
    │                              └──────fallan los reintentos──▶ error_envio
-   └──IDLE_TIMEOUT sin eventos──▶ abandonada (no se envía a Scala)
+   └──timeout de su juego sin eventos──▶ abandonada (no se envía a Scala)
 ```
 
-Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED` (entran) y con `PLAYER_LEFT` y `PLAYER_DISCONNECTED` (salen).
+Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED` (entran) y con `PLAYER_LEFT` y `PLAYER_DISCONNECTED` (salen). El timeout de cada juego se explica en [Tiempo de espera por juego](#tiempo-de-espera-por-juego).
+
+### `GET /games`
+
+```json
+[{"gameId":"chess","inProgress":1},{"gameId":"connect4","inProgress":2},{"gameId":"tetris","inProgress":0}]
+```
+
+Devuelve, por cada juego, cuántas partidas están `en_curso` en este momento. Detalles:
+
+- **No hay una lista fija de juegos:** salen los `gameId` que han aparecido en el store, incluidos los desconocidos (`chess`). Un juego cuyas partidas ya terminaron, se enviaron o se abandonaron sale con `"inProgress": 0`. Mientras no haya llegado ninguna partida, la respuesta es `[]`.
+- **Orden estable:** va ordenado por `gameId`.
+- **Lectura protegida:** `MatchStore.Games()` cuenta con `RLock`, igual que `List()`, así que se puede consultar mientras llegan eventos.
 
 ## Validación
 
@@ -150,28 +214,30 @@ Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED
 |---|---|---|
 | 1 | Tiene `eventId`, `timestamp`, `gameId`, `gameVersion`, `matchId` y `type` | `falta el campo matchId` |
 | 2 | `timestamp` en RFC 3339 | `timestamp no está en formato RFC 3339: "ayer a las 2"` |
-| 3 | `gameId` existe en el catálogo | `gameId desconocido: "chess"` |
+| 3 | `gameId` tiene el formato `^[a-z0-9-]{1,40}$` (cualquier juego con ese formato se acepta; ver [`gameId` abierto](#gameid-abierto)) | `gameId con formato inválido: "Chess!" (se espera ^[a-z0-9-]{1,40}$)` |
 | 4 | `type` es uno de los 9 tipos conocidos (los 8 generales y `PLAYER_ACTION`) | `type desconocido: "PLAYER_DANCED"` |
 | 5 | Tiene `playerId`, salvo en los eventos de la partida completa: `MATCH_STARTED`, `MATCH_FINISHED`, `MATCH_PAUSED` y `MATCH_RESUMED` | `falta el campo playerId (obligatorio en PLAYER_LEFT)` |
-| 6 | En `PLAYER_ACTION` hay una `action`, y no es una acción de **otro** juego del catálogo | `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")` |
+| 6 | En `PLAYER_ACTION` hay una `action`. En un juego conocido, además, no es una acción de **otro** juego del catálogo (en un juego desconocido solo se exige que no esté vacía) | `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")` |
 | 7 | `action` solo aparece en `PLAYER_ACTION` (acordado con Danny en el contrato) | `action solo se permite en PLAYER_ACTION (llegó en PLAYER_JOINED)` |
 
 Hay tres motivos de rechazo más, que no vienen de `Validate`:
 
 - **Formato:** el evento no se puede decodificar, por ejemplo `"timestamp": 5`. Se rechaza ese evento y los demás siguen.
 - **Partida ya finalizada:** llega un evento de una partida que ya recibió `MATCH_FINISHED`. Su lote ya se armó, así que el evento se rechaza (ver [Concurrencia](#concurrencia)).
-- **Partida abandonada por inactividad:** llega un evento de una partida que se abandonó por `IDLE_TIMEOUT`.
+- **Partida abandonada por inactividad:** llega un evento de una partida que se abandonó por inactividad (ver [Tiempo de espera por juego](#tiempo-de-espera-por-juego)).
 
 ### Acciones desconocidas
 
-El enunciado pide que un evento nuevo se pueda incorporar sin modificar todo el sistema. Por eso la regla 6 distingue dos casos:
+El enunciado pide que un evento nuevo se pueda incorporar sin modificar todo el sistema. Por eso, en un juego **conocido**, la regla 6 distingue dos casos:
 
 | La acción... | Qué hace Go | Por qué |
 |---|---|---|
 | es de **otro** juego (por ejemplo `TOP_OUT` en racing) | La **rechaza** | Se sabe que está mal: casi seguro es un error de la fuente de eventos |
 | no existe en **ningún** juego (por ejemplo `BOOST_JUMP`) | La **acepta**, la anota como aviso en `logs/unknown/unknown_actions.jsonl` y la devuelve en `warnings` | Puede ser un evento nuevo. Llega a Scala, que la cuenta como acción desconocida (`UnknownAction`) sin afectar el resto |
 
-Un `gameId` desconocido se sigue rechazando: un juego nuevo sí necesita su entrada en el catálogo y su analizador en Scala. `validation.UnknownAction(e)` le dice al handler cuándo avisar. El log de avisos usa el mismo `rejected.Logger` (con mutex) que el de rechazados, en otro archivo.
+En un juego **desconocido** no hay catálogo contra el cual comparar, así que no hay aviso: toda acción se acepta (si no, cada acción de un juego nuevo llenaría `unknown_actions.jsonl`). `validation.UnknownAction(e)` le dice al handler cuándo avisar, y solo responde `true` en juegos conocidos. El log de avisos usa el mismo `rejected.Logger` (con mutex) que el de rechazados, en otro archivo.
+
+Un juego nuevo ya no se rechaza en Go, pero **Scala** necesita su analizador: según el contrato, responde `400` a un lote cuyo `gameId` no tiene analyzer y, como Go no reintenta los `4xx`, esa partida queda como `error_envio`.
 
 ### Quién valida qué
 
@@ -218,7 +284,7 @@ La regla que se siguió: **channels para pasar datos y coordinar el flujo; mutex
 
 - **Channels:** los eventos *se mueven* de una goroutine a otra (handler → router → partida → sender). Cada dato tiene un solo dueño a la vez, así que no hay nada que proteger.
 - **Mapa `matchId → canal`:** lo usa **solo el router**, así que no necesita mutex.
-- **Store de partidas** (`state/match_store.go`): lo escriben el router y los senders y lo leen los handlers de `GET /matches`, cada uno en su propia goroutine. Es estado compartido, así que usa `sync.RWMutex`: varias lecturas pueden ir a la vez (`RLock`) y una escritura (`Lock`) espera a quedar sola. `List()` devuelve **copias**, para que nadie lea el estado interno fuera del lock.
+- **Store de partidas** (`state/match_store.go`): lo escriben el router y los senders y lo leen los handlers de `GET /matches` y `GET /games`, cada uno en su propia goroutine. Es estado compartido, así que usa `sync.RWMutex`: varias lecturas pueden ir a la vez (`RLock`) y una escritura (`Lock`) espera a quedar sola. `List()` y `Games()` devuelven **copias**, para que nadie lea el estado interno fuera del lock.
 - **Log de rechazados:** un archivo que escriben varios handlers a la vez, así que usa `sync.Mutex`.
 
 ### Quién cierra cada channel
@@ -246,11 +312,11 @@ Si llega un evento de una partida que ya recibió `MATCH_FINISHED`, el router lo
 
 ### Abandono por inactividad
 
-Si una partida pasa `IDLE_TIMEOUT` (por defecto 2 minutos) sin recibir eventos, se marca como `abandonada` y **no se envía a Scala**, porque está incompleta. Se mide con la hora real del servidor al recibir cada evento, no con el `timestamp` del evento.
+Si una partida pasa el timeout de su juego sin recibir eventos (1 minuto en tetris, 2 en fighting, 15 en connect4 y `IDLE_TIMEOUT` en el resto, ver [Tiempo de espera por juego](#tiempo-de-espera-por-juego)), se marca como `abandonada` y **no se envía a Scala**, porque está incompleta. Se mide con la hora real del servidor al recibir cada evento, no con el `timestamp` del evento.
 
-El router lo resuelve sin goroutines ni locks extra. Guarda la hora del último evento de cada partida y usa un `select` que espera dos cosas a la vez: un evento nuevo o el tic de un `time.Ticker`. En cada tic recorre sus partidas abiertas y, a las inactivas, les cierra el canal y las marca como abandonadas. Como el canal se cerró sin `MATCH_FINISHED`, la goroutine de la partida termina sin armar lote. El router sigue siendo el único dueño del mapa y de los canales.
+El router lo resuelve sin goroutines ni locks extra. Cuando ve por primera vez una partida, fija su timeout según su `gameId` (`IdleTimeouts.For`, en `pipeline/timeouts.go`) y lo guarda junto con la hora del último evento. Usa un `select` que espera dos cosas a la vez: un evento nuevo o el tic de un `time.Ticker`. En cada tic recorre sus partidas abiertas y, a las inactivas, les cierra el canal y las marca como abandonadas. Como el canal se cerró sin `MATCH_FINISHED`, la goroutine de la partida termina sin armar lote. El router sigue siendo el único dueño del mapa y de los canales.
 
-El tic ocurre cada medio `IDLE_TIMEOUT`, así que una partida se abandona entre 1 y 1,5 veces `IDLE_TIMEOUT` después de su último evento. Un evento que llegue después se rechaza:
+El tic ocurre cada medio timeout del juego **más corto**, así que una partida nunca se abandona antes del timeout de su juego, y a más tardar medio timeout del juego más corto después (con tetris en `1m`, el reloj revisa cada 30 s). Un evento que llegue después se rechaza:
 
 ```json
 {"received":1,"accepted":0,"rejected":[{"eventId":"y-e3","reason":"partida abandonada por inactividad"}]}
@@ -277,7 +343,7 @@ Un segundo Ctrl+C cierra el programa de inmediato. Si Scala está caído al apag
 ### Cómo se comprueba
 
 - `go test -race ./...` corre todos los tests con el detector de data races. También corre en el CI (`.github/workflows/ci-go.yml`).
-- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`) y que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`).
+- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`), que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`) y los timeouts distintos por juego (`TestIdleTimeoutPerGame`, `TestIdleTimeoutDefaultForUnlistedGame`).
 - `pipeline/sender_test.go` comprueba que, al cerrar el pipeline, los lotes pendientes se envían igual a un Scala lento antes de que los senders terminen (`TestCloseSendsPendingBatches`).
 - El simulador manda cada partida desde su propia goroutine, así que los eventos llegan intercalados al servidor.
 
@@ -339,7 +405,7 @@ go run ./cmd/simulator -racing 4 -fighting 4 -connect4 4 -tetris 4 -seed 42 -cor
 
 - **Determinista:** todo sale de un solo `rand.New(rand.NewSource(seed))` y de una fecha base fija. No se usa `time.Now()` ni el `rand` global, y los jugadores se eligen de slices y no de maps, porque en Go el orden en que se recorre un map es aleatorio. Los `matchId` llevan la semilla (`race-s42-001`) para poder correr varias semillas contra el mismo servidor.
 - **Concurrente:** cada partida se envía en su propia goroutine, en grupos de 5 eventos, para que los eventos de distintas partidas lleguen mezclados.
-- **Eventos dañados:** se agregan como **copias** con `eventId` terminado en `-bad`, cada una rompiendo una regla de validación. Se usan copias para que la partida original siga completa: si se dañara un `DISC_DROPPED`, el tablero de connect4 quedaría distinto y lo que viene después no tendría sentido. Para la regla 6 se elige una acción del catálogo que pertenece a **otro** juego (por ejemplo `DISC_DROPPED` en tetris).
+- **Eventos dañados:** se agregan como **copias** con `eventId` terminado en `-bad`, cada una rompiendo una regla de validación. Se usan copias para que la partida original siga completa: si se dañara un `DISC_DROPPED`, el tablero de connect4 quedaría distinto y lo que viene después no tendría sentido. Para la regla 3 se usa un `gameId` con formato inválido (`Chess!`), y para la regla 6 se elige una acción del catálogo que pertenece a **otro** juego (por ejemplo `DISC_DROPPED` en tetris).
 
 ### Cómo se genera cada juego
 
@@ -403,7 +469,9 @@ Con la configuración por defecto se generan 30 partidas: 14 guionizadas y 4 ale
 
 ## Agregar un juego nuevo
 
-Para la ingestión basta con **editar un solo lugar**, el catálogo de `internal/validation/catalog.go`:
+Para la ingestión **no hace falta editar nada**: cualquier `gameId` con formato válido (`^[a-z0-9-]{1,40}$`) se acepta desde el primer evento, con las reglas genéricas, y aparece en `GET /games`. Si el juego necesita otro tiempo de espera, se agrega a `IDLE_TIMEOUT_BY_GAME` (por ejemplo `tennis=10m`), sin tocar el código.
+
+Lo que sí requiere editar código es darle **validación estricta de acciones**: se agrega una entrada al catálogo de `internal/validation/catalog.go`:
 
 ```go
 var GameActions = map[string]map[string]bool{
@@ -415,9 +483,9 @@ var GameActions = map[string]map[string]bool{
 }
 ```
 
-Nada más cambia en Go: la validación lee el catálogo, el pipeline agrupa por `matchId` sin importar el juego, y `data` se reenvía sin interpretarlo. Así se fue football y entró connect4, y así se achicaron racing y fighting: en el servidor solo cambió `catalog.go`; el handler, el pipeline, el store y el cliente de Scala quedaron igual.
+Con eso se rechazan las acciones de otro juego en `tennis`, y las acciones nuevas generan aviso. Nada más cambia en Go: la validación lee el catálogo, el pipeline agrupa por `matchId` sin importar el juego, y `data` se reenvía sin interpretarlo. Así se fue football y entró connect4, y así se achicaron racing y fighting: en el servidor solo cambió `catalog.go`; el handler, el pipeline, el store y el cliente de Scala quedaron igual.
 
-Para una acción nueva de un juego que ya existe no hace falta ni eso: se acepta como acción desconocida (con un aviso) y llega a Scala. Agregarla al catálogo solo hace que deje de avisarse.
+Para una acción nueva de un juego conocido no hace falta ni eso: se acepta como acción desconocida (con un aviso) y llega a Scala. Agregarla al catálogo solo hace que deje de avisarse.
 
 Para que el simulador genere partidas del juego nuevo hay que agregar su generador (un archivo como `connect4.go`), un campo en `simulator.Counts` y una opción en `cmd/simulator/main.go`. Del lado de Scala, el juego necesita su propio analizador (ver el [README principal](../README.md)).
 
@@ -430,12 +498,12 @@ ingestion-go/
 │   └── simulator/main.go        opciones del simulador y resumen del envío
 ├── internal/
 │   ├── model/event.go           Event y Batch
-│   ├── api/handler.go           /health, /events, /matches
-│   ├── validation/              catálogo de juegos (catalog.go) y Validate
+│   ├── api/handler.go           /health, /events, /matches, /games
+│   ├── validation/              catálogo de juegos conocidos (catalog.go) y Validate
 │   ├── state/match_store.go     estado de las partidas (sync.RWMutex)
-│   ├── pipeline/                router y goroutines de partida (dispatcher.go), senders (sender.go)
+│   ├── pipeline/                router y goroutines de partida (dispatcher.go), timeouts por juego (timeouts.go), senders (sender.go)
 │   ├── client/scala_client.go   POST /analyze con reintentos
-│   ├── config/config.go         variables de entorno
+│   ├── config/config.go         variables de entorno (incluye IDLE_TIMEOUT_BY_GAME)
 │   ├── rejected/log.go          rejected.jsonl y unknown_actions.jsonl (sync.Mutex)
 │   └── simulator/               generadores de los 4 juegos, escenarios, eventos dañados
 ├── testdata/invalid_events.json un evento inválido por regla, para los tests
