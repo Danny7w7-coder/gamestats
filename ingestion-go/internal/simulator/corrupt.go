@@ -49,8 +49,8 @@ func damage(r *rand.Rand, e model.Event) model.Event {
 		bad.MatchID = ""
 	case 1: // regla 2: timestamp que no es RFC 3339
 		bad.Timestamp = "ayer a las 2"
-	case 2: // regla 3: juego desconocido
-		bad.GameID = "chess"
+	case 2: // regla 3: gameId con formato inválido (mayúscula y signo)
+		bad.GameID = "Chess!"
 	case 3: // regla 4: tipo desconocido
 		bad.Type = "PLAYER_DANCED"
 	case 4: // regla 5: falta playerId (se fuerza un tipo que lo exige)

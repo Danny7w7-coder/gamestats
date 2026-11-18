@@ -54,24 +54,25 @@ type submission struct {
 type openMatch struct {
 	ch       chan model.Event // canal de la goroutine de la partida
 	lastSeen time.Time        // hora (real, del servidor) de su último evento
+	timeout  time.Duration    // inactividad que tolera, según su juego
 }
 
 // Dispatcher conecta el handler HTTP con las goroutines de cada partida.
 type Dispatcher struct {
-	in          chan submission
-	out         chan model.Batch
-	store       *state.MatchStore
-	idleTimeout time.Duration // sin eventos durante este tiempo, la partida se abandona
+	in       chan submission
+	out      chan model.Batch
+	store    *state.MatchStore
+	timeouts IdleTimeouts // sin eventos durante este tiempo (según el juego), la partida se abandona
 }
 
-// New crea el dispatcher y arranca la goroutine del router. idleTimeout
-// (IDLE_TIMEOUT) debe ser mayor que 0.
-func New(store *state.MatchStore, idleTimeout time.Duration) *Dispatcher {
+// New crea el dispatcher y arranca la goroutine del router. Todos los
+// timeouts (IDLE_TIMEOUT y los de IDLE_TIMEOUT_BY_GAME) deben ser mayores que 0.
+func New(store *state.MatchStore, timeouts IdleTimeouts) *Dispatcher {
 	d := &Dispatcher{
-		in:          make(chan submission),
-		out:         make(chan model.Batch, outBuffer),
-		store:       store,
-		idleTimeout: idleTimeout,
+		in:       make(chan submission),
+		out:      make(chan model.Batch, outBuffer),
+		store:    store,
+		timeouts: timeouts,
 	}
 	go d.route()
 	return d
@@ -113,9 +114,10 @@ func (d *Dispatcher) route() {
 	matches := make(map[string]*openMatch) // matchId -> partida en curso
 	var wg sync.WaitGroup                  // goroutines de partida vivas
 
-	// Se revisa cada medio IDLE_TIMEOUT: una partida se abandona entre 1 y
-	// 1.5 veces IDLE_TIMEOUT después de su último evento.
-	ticker := time.NewTicker(d.idleTimeout / 2)
+	// Se revisa cada medio timeout del juego más impaciente: una partida se
+	// abandona nunca antes del timeout de SU juego, y a más tardar medio
+	// timeout del juego más impaciente después.
+	ticker := time.NewTicker(d.timeouts.min() / 2)
 	defer ticker.Stop()
 
 	for {
@@ -163,7 +165,7 @@ func (d *Dispatcher) dispatch(e model.Event, matches map[string]*openMatch, wg *
 	m, ok := matches[e.MatchID]
 	if !ok {
 		// Primera vez que vemos esta partida: creamos su goroutine.
-		m = &openMatch{ch: make(chan model.Event)}
+		m = &openMatch{ch: make(chan model.Event), timeout: d.timeouts.For(e.GameID)}
 		matches[e.MatchID] = m
 		wg.Add(1)
 		go d.collect(m.ch, wg)
@@ -180,17 +182,17 @@ func (d *Dispatcher) dispatch(e model.Event, matches map[string]*openMatch, wg *
 	return nil
 }
 
-// abandonIdle abandona las partidas que llevan idleTimeout sin eventos: las
+// abandonIdle abandona las partidas que llevan el timeout de su juego sin eventos: las
 // marca como abandonadas y cierra su canal. Como no llegó MATCH_FINISHED, su
 // goroutine termina sin armar lote (no se envían a Scala). Solo la llama el
 // router.
 func (d *Dispatcher) abandonIdle(now time.Time, matches map[string]*openMatch) {
 	for id, m := range matches {
-		if now.Sub(m.lastSeen) >= d.idleTimeout {
+		if now.Sub(m.lastSeen) >= m.timeout {
 			d.store.SetStatus(id, state.StatusAbandoned)
 			close(m.ch)
 			delete(matches, id) // borrar durante un range es válido en Go
-			log.Printf("partida %s abandonada: sin eventos durante %s", id, d.idleTimeout)
+			log.Printf("partida %s abandonada: sin eventos durante %s", id, m.timeout)
 		}
 	}
 }

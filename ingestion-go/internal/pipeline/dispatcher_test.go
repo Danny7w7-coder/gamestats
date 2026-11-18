@@ -53,7 +53,7 @@ func eventIDs(events []model.Event) []string {
 // Dos partidas mezcladas, con eventos fuera de orden: deben salir dos lotes
 // separados y cada uno ordenado por timestamp.
 func TestTwoInterleavedMatches(t *testing.T) {
-	d := New(state.NewMatchStore(), time.Hour)
+	d := New(state.NewMatchStore(), Uniform(time.Hour))
 
 	arrivals := []model.Event{
 		ev("a1", "A", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""),
@@ -103,7 +103,7 @@ func TestTwoInterleavedMatches(t *testing.T) {
 // ni al store, y no crea una partida nueva.
 func TestLateEventIsRejected(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store, time.Hour)
+	d := New(store, Uniform(time.Hour))
 
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
@@ -134,7 +134,7 @@ func TestLateEventIsRejected(t *testing.T) {
 
 // Con el mismo timestamp, se respeta el orden de llegada (sort.SliceStable).
 func TestEqualTimestampsKeepArrivalOrder(t *testing.T) {
-	d := New(state.NewMatchStore(), time.Hour)
+	d := New(state.NewMatchStore(), Uniform(time.Hour))
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("x", "M", "2026-10-05T14:02:20Z", "PLAYER_JOINED", "p3"))
 	d.Submit(ev("y", "M", "2026-10-05T14:02:20Z", "PLAYER_JOINED", "p2"))
@@ -149,7 +149,7 @@ func TestEqualTimestampsKeepArrivalOrder(t *testing.T) {
 
 // Sin MATCH_STARTED, startedAt es el timestamp del primer evento.
 func TestStartedAtWithoutMatchStarted(t *testing.T) {
-	d := New(state.NewMatchStore(), time.Hour)
+	d := New(state.NewMatchStore(), Uniform(time.Hour))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:05Z", "PLAYER_JOINED", "p1"))
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:03Z", "PLAYER_JOINED", "p2"))
 	d.Submit(ev("e3", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
@@ -163,7 +163,7 @@ func TestStartedAtWithoutMatchStarted(t *testing.T) {
 // Al cerrar, una partida sin MATCH_FINISHED no produce lote, su goroutine
 // termina y Out() se cierra (collectBatches falla si algo queda colgado).
 func TestCloseWithUnfinishedMatch(t *testing.T) {
-	d := New(state.NewMatchStore(), time.Hour)
+	d := New(state.NewMatchStore(), Uniform(time.Hour))
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
 
@@ -176,7 +176,7 @@ func TestCloseWithUnfinishedMatch(t *testing.T) {
 // Con -race, este test detecta accesos sin sincronizar.
 func TestConcurrentSubmit(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store, time.Hour)
+	d := New(store, Uniform(time.Hour))
 	const matches, players = 20, 10
 
 	var wg sync.WaitGroup
@@ -237,7 +237,7 @@ func waitStatus(t *testing.T, store *state.MatchStore, matchID, want string) {
 // lote, su goroutine termina y un evento posterior se rechaza.
 func TestIdleMatchIsAbandoned(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store, 50*time.Millisecond)
+	d := New(store, Uniform(50*time.Millisecond))
 
 	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	d.Submit(ev("e2", "M", "2026-10-05T14:00:01Z", "PLAYER_JOINED", "p1"))
@@ -257,7 +257,7 @@ func TestIdleMatchIsAbandoned(t *testing.T) {
 // dure más que IDLE_TIMEOUT: lo que cuenta es el tiempo SIN eventos.
 func TestActiveMatchIsNotAbandoned(t *testing.T) {
 	store := state.NewMatchStore()
-	d := New(store, 200*time.Millisecond)
+	d := New(store, Uniform(200*time.Millisecond))
 
 	d.Submit(ev("e0", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
 	for i := 1; i <= 15; i++ { // 15 × 20 ms = 300 ms en total, más que el timeout
@@ -270,6 +270,98 @@ func TestActiveMatchIsNotAbandoned(t *testing.T) {
 	d.Submit(ev("end", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
 
 	if status, _ := store.Status("M"); status != state.StatusFinished {
+		t.Fatalf("estado = %q, se esperaba terminada", status)
+	}
+	if batches := collectBatches(t, d); len(batches) != 1 {
+		t.Fatalf("lotes = %d, se esperaba 1", len(batches))
+	}
+}
+
+// evGame es como ev, pero de un juego dado.
+func evGame(id, game, matchID, ts, typ, player string) model.Event {
+	e := ev(id, matchID, ts, typ, player)
+	e.GameID = game
+	return e
+}
+
+// Cada juego tiene su propio timeout: con el mismo tiempo sin eventos, la
+// partida del juego impaciente se abandona y la del paciente sigue en curso,
+// igual que la de un juego sin timeout propio (que usa el valor por defecto).
+func TestIdleTimeoutPerGame(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, IdleTimeouts{
+		Default: time.Hour,
+		PerGame: map[string]time.Duration{"tetris": 50 * time.Millisecond, "connect4": 2 * time.Hour},
+	})
+
+	d.Submit(evGame("t1", "tetris", "T", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	d.Submit(evGame("c1", "connect4", "C", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	d.Submit(evGame("r1", "racing", "R", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+
+	waitStatus(t, store, "T", state.StatusAbandoned)
+	// Se deja pasar bastante más que el timeout de tetris (3 veces) para
+	// confirmar que las otras dos NO se abandonan.
+	time.Sleep(150 * time.Millisecond)
+	for _, m := range []string{"C", "R"} {
+		if status, _ := store.Status(m); status != state.StatusInProgress {
+			t.Fatalf("partida %s: estado %q, se esperaba en_curso", m, status)
+		}
+	}
+
+	if err := d.Submit(evGame("t2", "tetris", "T", "2026-10-05T14:05:00Z", "MATCH_FINISHED", "")); !errors.Is(err, ErrMatchAbandoned) {
+		t.Fatalf("Submit tras abandono = %v, se esperaba ErrMatchAbandoned", err)
+	}
+	// Las que siguen vivas aceptan eventos y terminan con su lote.
+	d.Submit(evGame("c2", "connect4", "C", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+	d.Submit(evGame("r2", "racing", "R", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+	if batches := collectBatches(t, d); len(batches) != 2 {
+		t.Fatalf("lotes = %d, se esperaban 2 (connect4 y racing)", len(batches))
+	}
+}
+
+// Un juego sin timeout propio usa el valor por defecto, aunque otro juego
+// tenga uno mucho más largo.
+func TestIdleTimeoutDefaultForUnlistedGame(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, IdleTimeouts{
+		Default: 50 * time.Millisecond,
+		PerGame: map[string]time.Duration{"connect4": time.Hour},
+	})
+
+	d.Submit(evGame("x1", "chess", "X", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	d.Submit(evGame("c1", "connect4", "C", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+
+	waitStatus(t, store, "X", state.StatusAbandoned)
+	if status, _ := store.Status("C"); status != state.StatusInProgress {
+		t.Fatalf("connect4: estado %q, se esperaba en_curso", status)
+	}
+	if batches := collectBatches(t, d); len(batches) != 0 {
+		t.Fatalf("lotes = %d, se esperaban 0", len(batches))
+	}
+}
+
+// El timeout que cuenta es el del juego de la partida: un juego largo no se
+// abandona cuando se cumple el timeout (corto) de otro, aunque el reloj del
+// router corra al ritmo del más corto. Y una partida con eventos seguidos no
+// se abandona aunque dure más que el timeout de su juego.
+func TestIdleTimeoutLongGameKeepsAliveWithEvents(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, IdleTimeouts{
+		Default: time.Hour,
+		PerGame: map[string]time.Duration{"tetris": 100 * time.Millisecond},
+	})
+
+	d.Submit(evGame("t0", "tetris", "T", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	for i := 1; i <= 15; i++ { // 15 × 20 ms = 300 ms, más que el timeout de tetris
+		time.Sleep(20 * time.Millisecond)
+		ts := fmt.Sprintf("2026-10-05T14:00:%02dZ", i)
+		if err := d.Submit(evGame(fmt.Sprintf("t%d", i), "tetris", "T", ts, "PLAYER_JOINED", "p1")); err != nil {
+			t.Fatalf("evento %d rechazado: %v", i, err)
+		}
+	}
+	d.Submit(evGame("tend", "tetris", "T", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+
+	if status, _ := store.Status("T"); status != state.StatusFinished {
 		t.Fatalf("estado = %q, se esperaba terminada", status)
 	}
 	if batches := collectBatches(t, d); len(batches) != 1 {

@@ -33,7 +33,7 @@ func TestSendersUpdateStatus(t *testing.T) {
 	defer scala.Close()
 
 	store := state.NewMatchStore()
-	d := New(store, time.Hour)
+	d := New(store, Uniform(time.Hour))
 	done := make(chan struct{})
 	go func() {
 		RunSenders(2, d.Out(), client.New(scala.URL), store)
@@ -77,7 +77,7 @@ func TestCloseSendsPendingBatches(t *testing.T) {
 	defer scala.Close()
 
 	store := state.NewMatchStore()
-	d := New(store, time.Hour)
+	d := New(store, Uniform(time.Hour))
 	done := make(chan struct{})
 	go func() {
 		RunSenders(1, d.Out(), client.New(scala.URL), store) // un solo sender: van en fila

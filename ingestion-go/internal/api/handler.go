@@ -104,6 +104,13 @@ func (h *Handler) Matches(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.Store.List())
 }
 
+// Games devuelve, por cada juego que aparece en el store, cuántas de sus
+// partidas están en curso: [{"gameId":"connect4","inProgress":2}, ...].
+// No hay una lista fija de juegos: salen de lo que ha llegado.
+func (h *Handler) Games(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.Store.Games())
+}
+
 // reject agrega el rechazo a la respuesta y lo anota en rejected.jsonl.
 // Si el archivo falla, se avisa en consola pero la petición sigue adelante.
 func (h *Handler) reject(resp *eventsResponse, raw json.RawMessage, eventID, reason string) {
