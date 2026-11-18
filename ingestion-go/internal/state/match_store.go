@@ -29,6 +29,12 @@ type MatchInfo struct {
 	ConnectedPlayers []string `json:"connectedPlayers"`
 }
 
+// GameInfo resume un juego: cuántas de sus partidas están en curso ahora.
+type GameInfo struct {
+	GameID     string `json:"gameId"`
+	InProgress int    `json:"inProgress"`
+}
+
 // match es el estado interno de una partida. Solo se toca con el lock tomado.
 type match struct {
 	gameID     string
@@ -122,5 +128,30 @@ func (s *MatchStore) List() []MatchInfo {
 		})
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].MatchID < list[j].MatchID })
+	return list
+}
+
+// Games devuelve, por cada gameId que aparece en el store, cuántas partidas
+// están en curso (0 si todas terminaron o se abandonaron). Va ordenado por
+// gameId para que la salida sea estable. La lectura se hace con RLock, igual
+// que List.
+func (s *MatchStore) Games() []GameInfo {
+	s.mu.RLock()
+	counts := make(map[string]int)
+	for _, m := range s.matches {
+		if _, ok := counts[m.gameID]; !ok {
+			counts[m.gameID] = 0
+		}
+		if m.status == StatusInProgress {
+			counts[m.gameID]++
+		}
+	}
+	s.mu.RUnlock()
+
+	list := make([]GameInfo, 0, len(counts))
+	for id, n := range counts {
+		list = append(list, GameInfo{GameID: id, InProgress: n})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].GameID < list[j].GameID })
 	return list
 }

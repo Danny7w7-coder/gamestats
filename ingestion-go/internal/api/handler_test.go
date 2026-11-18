@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +197,70 @@ func TestUnknownActionAcceptedWithWarning(t *testing.T) {
 	}
 	if lines := strings.Count(string(raw), "\n"); lines != 1 || !strings.Contains(string(raw), "BOOST_JUMP") {
 		t.Fatalf("unknown_actions.jsonl = %q", raw)
+	}
+}
+
+func getGames(h *Handler) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/games", nil)
+	rec := httptest.NewRecorder()
+	h.Games(rec, req)
+	return rec
+}
+
+// GET /games sin partidas responde [] (no null).
+func TestGamesEmpty(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := getGames(h)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
+		t.Fatalf("cuerpo = %s, se esperaba []", got)
+	}
+}
+
+// GET /games lista los juegos que aparecen, también los desconocidos, con las
+// partidas en curso; un juego con todas sus partidas terminadas sale con 0.
+func TestGames(t *testing.T) {
+	h, _ := newTestHandler(t)
+	ev := func(id, game, match, typ string) string {
+		return `{"eventId":"` + id + `","timestamp":"2026-10-05T14:00:00Z","gameId":"` + game +
+			`","gameVersion":"1.0","matchId":"` + match + `","type":"` + typ + `"}`
+	}
+	body := "[" + strings.Join([]string{
+		ev("a1", "connect4", "c1", "MATCH_STARTED"),
+		ev("a2", "connect4", "c2", "MATCH_STARTED"),
+		ev("a3", "connect4", "c3", "MATCH_STARTED"),
+		ev("a4", "connect4", "c3", "MATCH_FINISHED"),
+		ev("b1", "tetris", "t1", "MATCH_STARTED"),
+		ev("b2", "tetris", "t1", "MATCH_FINISHED"),
+		ev("c1", "chess", "x1", "MATCH_STARTED"),
+	}, ",") + "]"
+	if rec := postEvents(h, body); rec.Code != http.StatusOK {
+		t.Fatalf("POST /events: status = %d", rec.Code)
+	}
+
+	rec := getGames(h)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	var got []state.GameInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []state.GameInfo{
+		{GameID: "chess", InProgress: 1},
+		{GameID: "connect4", InProgress: 2},
+		{GameID: "tetris", InProgress: 0},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GET /games = %+v, se esperaba %+v", got, want)
+	}
+	if !strings.Contains(rec.Body.String(), `{"gameId":"connect4","inProgress":2}`) {
+		t.Fatalf("formato JSON inesperado: %s", rec.Body.String())
 	}
 }

@@ -100,3 +100,77 @@ func TestConcurrentRecordAndList(t *testing.T) {
 		}
 	}
 }
+
+func evGame(matchID, gameID, typ string) model.Event {
+	return model.Event{MatchID: matchID, GameID: gameID, Type: typ}
+}
+
+// Games cuenta solo las partidas en curso y lista también los juegos que
+// ya no tienen ninguna (con 0), ordenados por gameId.
+func TestGames(t *testing.T) {
+	s := NewMatchStore()
+	if got := s.Games(); got == nil || len(got) != 0 {
+		t.Fatalf("store vacío debe dar lista vacía (no nil), dio %#v", got)
+	}
+
+	s.Record(evGame("c1", "connect4", "MATCH_STARTED"))
+	s.Record(evGame("c2", "connect4", "MATCH_STARTED"))
+	s.Record(evGame("c3", "connect4", "MATCH_STARTED"))
+	s.Record(evGame("c3", "connect4", "MATCH_FINISHED"))
+	s.Record(evGame("t1", "tetris", "MATCH_STARTED"))
+	s.Record(evGame("t1", "tetris", "MATCH_FINISHED"))
+	s.Record(evGame("x1", "chess", "MATCH_STARTED"))
+	s.Record(evGame("x2", "chess", "MATCH_STARTED"))
+	s.SetStatus("x2", StatusAbandoned)
+	s.Record(evGame("r1", "racing", "MATCH_STARTED"))
+
+	want := []GameInfo{
+		{GameID: "chess", InProgress: 1},
+		{GameID: "connect4", InProgress: 2},
+		{GameID: "racing", InProgress: 1},
+		{GameID: "tetris", InProgress: 0},
+	}
+	if got := s.Games(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Games() = %+v\nse esperaba  %+v", got, want)
+	}
+
+	// Una partida enviada o con error de envío ya no está en curso.
+	s.SetStatus("r1", StatusSent)
+	s.SetStatus("c1", StatusSendError)
+	got := s.Games()
+	if got[1].InProgress != 1 || got[2].InProgress != 0 {
+		t.Fatalf("después de enviar: %+v", got)
+	}
+}
+
+// Games se lee mientras otras goroutines escriben. Con -race, detecta
+// cualquier acceso al mapa sin el lock.
+func TestConcurrentRecordAndGames(t *testing.T) {
+	s := NewMatchStore()
+	const matches, perMatch = 10, 50
+
+	var wg sync.WaitGroup
+	for m := 0; m < matches; m++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			for i := 0; i < perMatch; i++ {
+				s.Record(evGame(id, "connect4", "PLAYER_JOINED"))
+			}
+		}(fmt.Sprintf("m%d", m))
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perMatch; i++ {
+				s.Games()
+			}
+		}()
+	}
+	wg.Wait()
+
+	want := []GameInfo{{GameID: "connect4", InProgress: matches}}
+	if got := s.Games(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Games() = %+v, se esperaba %+v", got, want)
+	}
+}

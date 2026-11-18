@@ -59,6 +59,7 @@ func main() {
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("POST /events", h.Events)
 	mux.HandleFunc("GET /matches", h.Matches)
+	mux.HandleFunc("GET /games", h.Games)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 
