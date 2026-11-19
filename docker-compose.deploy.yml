@@ -7,12 +7,14 @@
 #   docker compose -f docker-compose.deploy.yml down                  # apagar
 #
 # La versión se elige con GAMESTATS_TAG (por defecto v1.0, la de la entrega).
+# GAMESTATS_OWNER es la cuenta de GHCR: danny7w7-coder tiene la v1.0 (Proyecto 1);
+# desde la v1.1 el repo está en la organización y se publica en gamestats-danny-dylan.
 # Las imágenes sirven para amd64 y arm64 (por ejemplo, una Mac con chip Apple).
 
 services:
   # Análisis y estadísticas (Scala).
   analytics:
-    image: ghcr.io/danny7w7-coder/gamestats-analytics:${GAMESTATS_TAG:-v1.0}
+    image: ghcr.io/${GAMESTATS_OWNER:-danny7w7-coder}/gamestats-analytics:${GAMESTATS_TAG:-v1.0}
     ports:
       - "8081:8081"
     environment:
@@ -28,7 +30,7 @@ services:
 
   # Ingestión, validación y envío a Scala (Go).
   ingestion:
-    image: ghcr.io/danny7w7-coder/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
+    image: ghcr.io/${GAMESTATS_OWNER:-danny7w7-coder}/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
     ports:
       - "8080:8080"
     environment:
@@ -47,7 +49,7 @@ services:
   # Simulador de partidas (Go): misma imagen que ingestion, otro programa.
   # Solo corre a pedido (perfil "sim").
   simulator:
-    image: ghcr.io/danny7w7-coder/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
+    image: ghcr.io/${GAMESTATS_OWNER:-danny7w7-coder}/gamestats-ingestion:${GAMESTATS_TAG:-v1.0}
     profiles: ["sim"]
     entrypoint: ["/app/simulator"]
     command: ["-target", "http://ingestion:8080", "-seed", "42"]
