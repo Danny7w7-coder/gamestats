@@ -44,14 +44,14 @@ Cada lenguaje se usa donde su paradigma aporta más: Go para manejar muchos even
 | Versión | Qué es |
 |---|---|
 | [`v1.0`](https://github.com/GameStats-Danny-Dylan/gamestats/tree/v1.0) | La entrega del **Proyecto 1**: los eventos los genera un simulador |
-| [`v1.1`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1) | La que usa **[GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)** (Proyecto 2), donde los eventos los generan juegos de verdad. Agrega estadísticas por juego y generales, partidas en curso por juego, juegos nuevos sin cambiar el código, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio de Go. El contrato de eventos es el mismo |
-| `main` (próxima `v1.2`) | Una partida que no llega a Scala ya no se pierde: queda `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba |
+| [`v1.1`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1) | Para **[GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)** (Proyecto 2), donde los eventos los generan juegos de verdad. Agrega estadísticas por juego y generales, partidas en curso por juego, juegos nuevos sin cambiar el código, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio de Go. El contrato de eventos es el mismo |
+| [`v1.2`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2) | **La que usa GameConsole hoy.** Igual que la `v1.1`, y además una partida que no llega a Scala ya no se pierde: queda `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba |
 
 ---
 
 ## 2. Probarlo en 5 minutos
 
-Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.1`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
+Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.2`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
 
 - **Solo hace falta [Docker](https://www.docker.com/)** (en Windows y Mac, Docker Desktop abierto).
 - No hace falta Java, sbt ni Go, no se compila nada y no se necesita ningún archivo del repositorio.
@@ -408,22 +408,22 @@ ghcr.io/gamestats-danny-dylan/gamestats-ingestion:<tag>
 
 con estos tags: el hash de cada commit, `latest` (lo último de `main`) y el nombre de cada versión. Una versión es fija: aunque después haya cambios en `main`, `v1.0` siempre es la misma.
 
-`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.1` (la que usa GameConsole, el Proyecto 2):
+`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.2` (la que usa GameConsole, el Proyecto 2):
 
 ```bash
-GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.1 docker compose -f docker-compose.deploy.yml up -d --wait
+GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.2 docker compose -f docker-compose.deploy.yml up -d --wait
 ```
 
-En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.1"; docker compose -f docker-compose.deploy.yml up -d --wait`.
+En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.2"; docker compose -f docker-compose.deploy.yml up -d --wait`.
 
 Para publicar una versión nueva:
 
 ```bash
-git tag v1.2
-git push origin v1.2
+git tag v1.3
+git push origin v1.3
 ```
 
-Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio.
+Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio; la `v1.2` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2)) agrega el reenvío a Scala (`reintentando`).
 
 ---
 
