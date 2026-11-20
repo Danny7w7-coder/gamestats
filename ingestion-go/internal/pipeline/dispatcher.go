@@ -21,12 +21,14 @@ package pipeline
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"sort"
 	"sync"
 	"time"
 
 	"gamestats/ingestion/internal/model"
+	"gamestats/ingestion/internal/persist"
 	"gamestats/ingestion/internal/state"
 	"gamestats/ingestion/internal/validation"
 )
@@ -38,6 +40,16 @@ var ErrMatchFinished = errors.New("partida ya finalizada")
 // ErrMatchAbandoned se devuelve cuando llega un evento de una partida que se
 // abandonó por inactividad.
 var ErrMatchAbandoned = errors.New("partida abandonada por inactividad")
+
+// ErrUnknownMatch se devuelve cuando el primer evento que se ve de una partida
+// no es MATCH_STARTED: la partida empezó sin que ingestion la viera (por
+// ejemplo, antes de un reinicio). Si se aceptara, se mandaría a Scala una
+// partida truncada con estadísticas falsas, así que se rechaza y no se crea.
+var ErrUnknownMatch = errors.New("partida desconocida: no se vio MATCH_STARTED")
+
+// ErrPersist se devuelve cuando DATA_DIR está activo y el evento no se pudo
+// guardar en disco: no se acepta un evento que un reinicio perdería.
+var ErrPersist = errors.New("no se pudo guardar el evento en disco")
 
 // outBuffer deja que unas cuantas partidas terminadas esperen en el canal de
 // salida si los senders están ocupados (por ejemplo, reintentando con Scala).
@@ -62,25 +74,113 @@ type Dispatcher struct {
 	in       chan submission
 	out      chan model.Batch
 	store    *state.MatchStore
-	timeouts IdleTimeouts // sin eventos durante este tiempo (según el juego), la partida se abandona
+	timeouts IdleTimeouts     // sin eventos durante este tiempo (según el juego), la partida se abandona
+	journal  *persist.Journal // archivos de las partidas en curso; nil = sin persistencia
+
+	// matches y wg los usa SOLO el router (y el constructor antes de
+	// arrancarlo), por eso no necesitan mutex.
+	matches map[string]*openMatch // matchId -> partida en curso
+	wg      sync.WaitGroup        // goroutines de partida vivas
 }
 
-// New crea el dispatcher y arranca la goroutine del router. Todos los
-// timeouts (IDLE_TIMEOUT y los de IDLE_TIMEOUT_BY_GAME) deben ser mayores que 0.
+// Restored resume lo que NewPersistent reconstruyó desde DATA_DIR.
+type Restored struct {
+	InProgress int // partidas que siguen en curso
+	Finished   int // partidas que ya tenían MATCH_FINISHED: se envían a Scala
+	Events     int // eventos restaurados
+	Skipped    int // líneas corruptas o eventos que no se pudieron restaurar
+	Discarded  int // archivos de los que no se restauró nada (se apartan)
+}
+
+// New crea el dispatcher sin persistencia y arranca la goroutine del router.
+// Todos los timeouts (IDLE_TIMEOUT y los de IDLE_TIMEOUT_BY_GAME) deben ser
+// mayores que 0.
 func New(store *state.MatchStore, timeouts IdleTimeouts) *Dispatcher {
-	d := &Dispatcher{
-		in:       make(chan submission),
-		out:      make(chan model.Batch, outBuffer),
-		store:    store,
-		timeouts: timeouts,
-	}
+	d := newDispatcher(store, timeouts, nil)
 	go d.route()
 	return d
 }
 
+// NewPersistent crea el dispatcher con persistencia en j (DATA_DIR):
+//   - reconstruye el store y las partidas en curso con los archivos de j,
+//     pasando sus eventos por la misma lógica que un evento nuevo, pero sin
+//     volver a guardarlos. El timeout de abandono de cada partida cuenta
+//     desde la hora (del servidor) de su último evento guardado;
+//   - cada evento aceptado desde ahora se guarda en disco antes de que
+//     Submit responda;
+//   - el archivo de una partida se borra cuando llega a un estado final
+//     (enviada, abandonada o error_envio).
+//
+// Debe llamarse antes de que alguien más use el store. Quien llama debe
+// empezar a leer Out() enseguida: las partidas restauradas que ya tenían
+// MATCH_FINISHED se envían a Scala.
+func NewPersistent(store *state.MatchStore, timeouts IdleTimeouts, j *persist.Journal) (*Dispatcher, Restored, error) {
+	saved, err := j.Load()
+	if err != nil {
+		return nil, Restored{}, err
+	}
+	// Antes de restaurar: un estado final (que llega después, desde el
+	// router o los senders) borra el archivo de la partida.
+	store.OnFinal(j.Remove)
+
+	d := newDispatcher(store, timeouts, j)
+	r := d.restore(saved)
+	go d.route()
+	return d, r, nil
+}
+
+func newDispatcher(store *state.MatchStore, timeouts IdleTimeouts, j *persist.Journal) *Dispatcher {
+	return &Dispatcher{
+		in:       make(chan submission),
+		out:      make(chan model.Batch, outBuffer),
+		store:    store,
+		timeouts: timeouts,
+		journal:  j,
+		matches:  make(map[string]*openMatch),
+	}
+}
+
+// restore pasa por dispatch los eventos guardados de cada partida, sin
+// volver a guardarlos. Corre antes de que arranque el router, en la misma
+// goroutine que el constructor, así que puede usar matches y wg.
+func (d *Dispatcher) restore(saved []persist.Saved) Restored {
+	var r Restored
+	for _, s := range saved {
+		r.Skipped += s.Skipped
+		matchID, accepted := "", 0
+		for _, e := range s.Events {
+			err := validation.Validate(e)
+			if err == nil {
+				err = d.dispatch(e, s.LastSeen, false)
+			}
+			if err != nil {
+				r.Skipped++
+				log.Printf("aviso: %s: el evento %s no se restaura: %v", s.File, e.EventID, err)
+				continue
+			}
+			matchID = e.MatchID
+			accepted++
+		}
+		if accepted == 0 {
+			r.Discarded++
+			log.Printf("aviso: %s no tiene eventos que restaurar; se aparta como %s.descartado", s.File, s.File)
+			d.journal.Discard(s.File)
+			continue
+		}
+		r.Events += accepted
+		if status, _ := d.store.Status(matchID); status == state.StatusInProgress {
+			r.InProgress++
+		} else {
+			r.Finished++
+		}
+	}
+	return r
+}
+
 // Submit entrega un evento (ya validado) al router y espera su respuesta:
-// nil si lo aceptó, o ErrMatchFinished / ErrMatchAbandoned si la partida ya
-// no está en curso.
+// nil si lo aceptó, ErrMatchFinished / ErrMatchAbandoned si la partida ya
+// no está en curso, o ErrUnknownMatch si es el primer evento de una partida
+// y no es MATCH_STARTED.
 // Se espera la respuesta porque solo el router conoce el orden real de
 // llegada, y así POST /events puede informar el rechazo con exactitud.
 // No se debe llamar después de Close.
@@ -100,20 +200,18 @@ func (d *Dispatcher) Out() <-chan model.Batch {
 }
 
 // Close cierra el canal de entrada. El router termina lo pendiente, cierra
-// los canales de partida, espera a sus goroutines y cierra out.
+// los canales de partida, espera a sus goroutines y cierra out. Con
+// persistencia, las partidas en curso quedan en disco para el próximo arranque.
 func (d *Dispatcher) Close() {
 	close(d.in)
 }
 
-// route es la goroutine del router. El mapa matches lo usa SOLO esta
-// goroutine, por eso no necesita mutex.
+// route es la goroutine del router. matches lo usa SOLO esta goroutine, por
+// eso no necesita mutex.
 //
 // El select espera dos cosas a la vez: un evento nuevo (in) o el tic del
 // reloj que revisa si hay partidas inactivas.
 func (d *Dispatcher) route() {
-	matches := make(map[string]*openMatch) // matchId -> partida en curso
-	var wg sync.WaitGroup                  // goroutines de partida vivas
-
 	// Se revisa cada medio timeout del juego más impaciente: una partida se
 	// abandona nunca antes del timeout de SU juego, y a más tardar medio
 	// timeout del juego más impaciente después.
@@ -128,70 +226,91 @@ func (d *Dispatcher) route() {
 				// abiertas (no se envían), esperamos a que todas las
 				// goroutines terminen y recién entonces cerramos out
 				// (nadie más va a enviar ahí).
-				if len(matches) > 0 {
-					log.Printf("apagado: %d partidas sin terminar no se envían a Scala", len(matches))
+				if n := len(d.matches); n > 0 {
+					if d.journal != nil {
+						log.Printf("apagado: %d partidas en curso quedan guardadas en %s y se retoman al reiniciar", n, d.journal.Dir())
+					} else {
+						log.Printf("apagado: %d partidas sin terminar no se envían a Scala", n)
+					}
 				}
-				for _, m := range matches {
+				for _, m := range d.matches {
 					close(m.ch)
 				}
-				wg.Wait()
+				d.wg.Wait()
 				close(d.out)
 				return
 			}
-			sub.reply <- d.dispatch(sub.event, matches, &wg)
+			sub.reply <- d.dispatch(sub.event, time.Now(), true)
 
 		case now := <-ticker.C:
-			d.abandonIdle(now, matches)
+			d.abandonIdle(now)
 		}
 	}
 }
 
 // dispatch entrega un evento a la goroutine de su partida (creándola si es
-// la primera vez) y devuelve la respuesta para Submit. Solo la llama el router.
-func (d *Dispatcher) dispatch(e model.Event, matches map[string]*openMatch, wg *sync.WaitGroup) error {
+// la primera vez) y devuelve la respuesta para Submit. receivedAt es la hora
+// del servidor al recibirlo (cuenta para el abandono por inactividad). Con
+// save, el evento se guarda en disco antes de aceptarlo; restore lo llama sin
+// save porque el evento ya está guardado. Solo la llaman el router y restore.
+func (d *Dispatcher) dispatch(e model.Event, receivedAt time.Time, save bool) error {
 	// Evento tardío: si la partida ya no está en curso, su lote ya salió (o
 	// se abandonó). Se rechaza y NO se crea una goroutine nueva.
-	if status, ok := d.store.Status(e.MatchID); ok && status != state.StatusInProgress {
+	status, known := d.store.Status(e.MatchID)
+	if known && status != state.StatusInProgress {
 		if status == state.StatusAbandoned {
 			return ErrMatchAbandoned
 		}
 		return ErrMatchFinished
+	}
+	// Partida que el store no conoce: solo MATCH_STARTED puede crearla.
+	if !known && e.Type != validation.TypeMatchStarted {
+		return ErrUnknownMatch
+	}
+
+	// Primero al disco: si no se puede guardar, el evento no se acepta (un
+	// reinicio lo perdería sin que la fuente lo sepa).
+	if save {
+		if err := d.journal.Append(e, receivedAt); err != nil {
+			log.Printf("ERROR al guardar el evento %s de %s: %v", e.EventID, e.MatchID, err)
+			return fmt.Errorf("%w: %v", ErrPersist, err)
+		}
 	}
 
 	// El router es el único que registra eventos en el store, así el
 	// estado siempre refleja el orden en que el router los procesó.
 	d.store.Record(e)
 
-	m, ok := matches[e.MatchID]
+	m, ok := d.matches[e.MatchID]
 	if !ok {
 		// Primera vez que vemos esta partida: creamos su goroutine.
 		m = &openMatch{ch: make(chan model.Event), timeout: d.timeouts.For(e.GameID)}
-		matches[e.MatchID] = m
-		wg.Add(1)
-		go d.collect(m.ch, wg)
+		d.matches[e.MatchID] = m
+		d.wg.Add(1)
+		go d.collect(m.ch, &d.wg)
 	}
-	m.lastSeen = time.Now()
+	m.lastSeen = receivedAt
 	m.ch <- e
 
 	if e.Type == validation.TypeMatchFinished {
 		// No habrá más eventos para esta partida: cerrar su canal hace
 		// que su goroutine salga del range y arme el lote.
 		close(m.ch)
-		delete(matches, e.MatchID)
+		delete(d.matches, e.MatchID)
 	}
 	return nil
 }
 
 // abandonIdle abandona las partidas que llevan el timeout de su juego sin eventos: las
 // marca como abandonadas y cierra su canal. Como no llegó MATCH_FINISHED, su
-// goroutine termina sin armar lote (no se envían a Scala). Solo la llama el
-// router.
-func (d *Dispatcher) abandonIdle(now time.Time, matches map[string]*openMatch) {
-	for id, m := range matches {
+// goroutine termina sin armar lote (no se envían a Scala). Marcarla como
+// abandonada borra su archivo en DATA_DIR. Solo la llama el router.
+func (d *Dispatcher) abandonIdle(now time.Time) {
+	for id, m := range d.matches {
 		if now.Sub(m.lastSeen) >= m.timeout {
 			d.store.SetStatus(id, state.StatusAbandoned)
 			close(m.ch)
-			delete(matches, id) // borrar durante un range es válido en Go
+			delete(d.matches, id) // borrar durante un range es válido en Go
 			log.Printf("partida %s abandonada: sin eventos durante %s", id, m.timeout)
 		}
 	}
@@ -233,7 +352,7 @@ func buildBatch(events []model.Event) model.Batch {
 		MatchID:     first.MatchID,
 		GameID:      first.GameID,
 		GameVersion: first.GameVersion,
-		StartedAt:   first.Timestamp, // si nunca llegó MATCH_STARTED, el primer evento
+		StartedAt:   first.Timestamp, // se reemplaza abajo por el de MATCH_STARTED
 		Players:     []string{},
 		Events:      events,
 	}

@@ -88,3 +88,24 @@ func TestDamageAlwaysInvalid(t *testing.T) {
 		}
 	}
 }
+
+// Ingestion rechaza los eventos de una partida cuyo MATCH_STARTED no vio. Con
+// cualquier porcentaje de daño, el primer evento VÁLIDO de cada partida (el
+// primero que llega al pipeline) tiene que seguir siendo su MATCH_STARTED.
+func TestCorruptKeepsMatchStartedFirst(t *testing.T) {
+	for _, percent := range []int{0, 20, 100} {
+		matches := Generate(42, Counts{Racing: 3, Connect4: 3, Fighting: 3, Tetris: 3})
+		Corrupt(matches, 42, percent)
+		for _, m := range matches {
+			for _, e := range m.Events {
+				if validation.Validate(e) != nil {
+					continue
+				}
+				if e.Type != validation.TypeMatchStarted || e.MatchID != m.ID {
+					t.Fatalf("%d %%: el primer evento válido de %s es %s (%s)", percent, m.ID, e.EventID, e.Type)
+				}
+				break
+			}
+		}
+	}
+}

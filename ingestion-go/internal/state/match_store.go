@@ -50,6 +50,22 @@ type match struct {
 type MatchStore struct {
 	mu      sync.RWMutex
 	matches map[string]*match // matchId -> estado
+	onFinal func(matchID string)
+}
+
+// OnFinal registra f para que se llame cada vez que SetStatus deja una
+// partida en un estado final (enviada, error_envio o abandonada). Se usa para
+// borrar su archivo en DATA_DIR. Debe llamarse antes de usar el store desde
+// varias goroutines.
+func (s *MatchStore) OnFinal(f func(matchID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onFinal = f
+}
+
+// isFinal dice si un estado es final: la partida ya no va a cambiar.
+func isFinal(status string) bool {
+	return status == StatusSent || status == StatusSendError || status == StatusAbandoned
 }
 
 // NewMatchStore crea un store vacío.
@@ -82,13 +98,20 @@ func (s *MatchStore) Record(e model.Event) {
 }
 
 // SetStatus cambia el estado de una partida que ya existe (por ejemplo, a
-// enviada o error_envio después de intentar mandarla a Scala).
+// enviada o error_envio después de intentar mandarla a Scala). Si el estado
+// es final, llama a la función de OnFinal, fuera del lock (puede tocar el
+// disco y no debe frenar a los lectores de GET /matches).
 func (s *MatchStore) SetStatus(matchID, status string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if m, ok := s.matches[matchID]; ok {
+	m, ok := s.matches[matchID]
+	if ok {
 		m.status = status
+	}
+	onFinal := s.onFinal
+	s.mu.Unlock()
+
+	if ok && onFinal != nil && isFinal(status) {
+		onFinal(matchID)
 	}
 }
 

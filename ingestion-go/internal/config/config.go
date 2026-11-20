@@ -26,6 +26,7 @@ type Config struct {
 	ScalaURL    string        // SCALA_URL: dirección del servicio de Scala
 	Workers     int           // WORKERS: cuántos senders envían a Scala
 	IdleTimeout time.Duration // IDLE_TIMEOUT: inactividad para abandonar una partida de un juego sin timeout propio
+	DataDir     string        // DATA_DIR: carpeta donde se guardan las partidas en curso; vacía = sin persistencia
 
 	// GameIdleTimeouts es el timeout de cada juego con valor propio: los de
 	// defaultGameTimeouts, reemplazados o ampliados por IDLE_TIMEOUT_BY_GAME.
@@ -39,6 +40,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:     getEnv("PORT", "8080"),
 		ScalaURL: getEnv("SCALA_URL", "http://localhost:8081"),
+		DataDir:  strings.TrimSpace(os.Getenv("DATA_DIR")),
 	}
 
 	workers, err := strconv.Atoi(getEnv("WORKERS", "4"))

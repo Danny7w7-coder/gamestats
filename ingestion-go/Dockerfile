@@ -26,13 +26,18 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/ingestion .
 FROM alpine:3.20
 WORKDIR /app
 
-# Usuario sin privilegios; es dueño de /app para poder escribir logs/.
-RUN adduser -D -H app && chown app /app
+# Usuario sin privilegios; es dueño de /app para poder escribir logs/ y
+# data/. /app/data existe en la imagen (y es de app) para que un volumen
+# montado ahí herede ese dueño: si no, Docker lo crea como root y el
+# servidor no podría guardar las partidas en curso (DATA_DIR=/app/data).
+RUN adduser -D -H app && mkdir /app/data && chown app /app /app/data
 USER app
 
 COPY --from=build /out/ingestion /out/simulator /app/
 
 # Puerto por defecto (variable PORT). En Docker, SCALA_URL se pasa desde
-# docker-compose (http://analytics:8081).
+# docker-compose (http://analytics:8081). DATA_DIR no tiene valor por defecto:
+# para que las partidas en curso sobrevivan a un reinicio, docker-compose pasa
+# DATA_DIR=/app/data y monta un volumen en /app/data.
 EXPOSE 8080
 CMD ["/app/ingestion"]

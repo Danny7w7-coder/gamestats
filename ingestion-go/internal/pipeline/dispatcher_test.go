@@ -147,16 +147,47 @@ func TestEqualTimestampsKeepArrivalOrder(t *testing.T) {
 	}
 }
 
-// Sin MATCH_STARTED, startedAt es el timestamp del primer evento.
-func TestStartedAtWithoutMatchStarted(t *testing.T) {
-	d := New(state.NewMatchStore(), Uniform(time.Hour))
-	d.Submit(ev("e2", "M", "2026-10-05T14:00:05Z", "PLAYER_JOINED", "p1"))
-	d.Submit(ev("e1", "M", "2026-10-05T14:00:03Z", "PLAYER_JOINED", "p2"))
-	d.Submit(ev("e3", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+// Una partida que el store no conoce solo puede empezar con MATCH_STARTED:
+// cualquier otro primer evento se rechaza con ErrUnknownMatch y no crea la
+// partida (ni en el store ni en el router). Después de un MATCH_STARTED, la
+// misma partida acepta eventos con normalidad.
+func TestUnknownMatchRejected(t *testing.T) {
+	store := state.NewMatchStore()
+	d := New(store, Uniform(time.Hour))
 
-	b := collectBatches(t, d)[0]
-	if b.StartedAt != "2026-10-05T14:00:03Z" {
-		t.Fatalf("startedAt = %s", b.StartedAt)
+	for _, e := range []model.Event{
+		ev("e1", "M", "2026-10-05T14:00:05Z", "PLAYER_JOINED", "p1"),
+		ev("e2", "M", "2026-10-05T14:00:06Z", "PLAYER_ACTION", "p1"),
+		ev("e3", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""),
+	} {
+		if err := d.Submit(e); !errors.Is(err, ErrUnknownMatch) {
+			t.Fatalf("Submit(%s) = %v, se esperaba ErrUnknownMatch", e.EventID, err)
+		}
+	}
+	if got := ErrUnknownMatch.Error(); got != "partida desconocida: no se vio MATCH_STARTED" {
+		t.Fatalf("motivo = %q", got)
+	}
+	if list := store.List(); len(list) != 0 {
+		t.Fatalf("store = %+v, no debía crearse la partida", list)
+	}
+
+	if err := d.Submit(ev("s", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", "")); err != nil {
+		t.Fatalf("MATCH_STARTED = %v", err)
+	}
+	if err := d.Submit(ev("e4", "M", "2026-10-05T14:00:05Z", "PLAYER_JOINED", "p1")); err != nil {
+		t.Fatalf("evento tras MATCH_STARTED = %v", err)
+	}
+	d.Submit(ev("e5", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+
+	batches := collectBatches(t, d)
+	if len(batches) != 1 {
+		t.Fatalf("lotes = %d, se esperaba 1", len(batches))
+	}
+	if got := eventIDs(batches[0].Events); !reflect.DeepEqual(got, []string{"s", "e4", "e5"}) {
+		t.Fatalf("eventos del lote = %v", got)
+	}
+	if batches[0].StartedAt != "2026-10-05T14:00:00Z" {
+		t.Fatalf("startedAt = %s", batches[0].StartedAt)
 	}
 }
 
