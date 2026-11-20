@@ -138,7 +138,7 @@ Un error en Go es un valor que se devuelve y se revisa en el momento. El cliente
 func (c *ScalaClient) post(body []byte) (retry bool, err error)
 ```
 
-Un `5xx` o un timeout se reintentan hasta 3 veces (esperando 1, 2 y 4 s). Un `4xx` no, porque el lote está mal y mandarlo otra vez no lo arregla. La idea se parece al `Either` de Scala, pero el compilador no obliga a revisar el error: la convención `if err != nil` sí.
+Un `5xx` o un timeout se reintentan hasta 3 veces (esperando 1, 2 y 4 s). Un `4xx` no, porque el lote está mal y mandarlo otra vez no lo arregla. Hacia afuera, `Send` envuelve ese caso en un error centinela (`client.ErrRejected`), y el sender pregunta con `errors.Is(err, client.ErrRejected)`: si es un rechazo, la partida queda `error_envio`; si no, queda `reintentando` y se vuelve a mandar cada 30 s. La idea se parece al `Either` de Scala, pero el compilador no obliga a revisar el error: la convención `if err != nil` sí.
 
 ### Limitaciones
 
@@ -192,7 +192,7 @@ El estado de las partidas en curso está solo en la memoria del proceso. Si el s
 
 ### ¿Por qué HTTP entre Go y Scala?
 
-- **Respuesta inmediata.** Cada envío devuelve un código (`2xx`, `4xx` o `5xx`), y con eso Go decide si la partida quedó `enviada`, si reintenta o si la marca como `error_envio`.
+- **Respuesta inmediata.** Cada envío devuelve un código (`2xx`, `4xx` o `5xx`), y con eso Go decide si la partida quedó `enviada`, si la reintenta (`reintentando`, hasta que Scala responda) o si la marca como `error_envio`.
 - **Sin dependencias.** Go trae servidor y cliente HTTP en la librería estándar. Se prueba con `curl.exe` a mano y con `httptest` en los tests.
 - **Simple en Docker.** Cada servicio llama al otro por su nombre (`http://analytics:8081`), sin volúmenes compartidos.
 

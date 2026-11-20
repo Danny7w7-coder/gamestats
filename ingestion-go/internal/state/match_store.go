@@ -15,8 +15,12 @@ const (
 	StatusInProgress = "en_curso"
 	StatusFinished   = "terminada"
 	StatusSent       = "enviada"
-	StatusSendError  = "error_envio"
-	StatusAbandoned  = "abandonada"
+	// StatusRetrying: Scala no respondió (caído, timeout o 5xx). La partida se
+	// vuelve a enviar sola cada cierto tiempo hasta que Scala la reciba; NO es
+	// un estado final, así que su archivo en DATA_DIR se conserva.
+	StatusRetrying  = "reintentando"
+	StatusSendError = "error_envio" // Scala rechazó el lote (4xx): reenviarlo no lo arregla
+	StatusAbandoned = "abandonada"
 )
 
 // MatchInfo es una foto (copia) del estado de una partida, lista para
@@ -64,6 +68,7 @@ func (s *MatchStore) OnFinal(f func(matchID string)) {
 }
 
 // isFinal dice si un estado es final: la partida ya no va a cambiar.
+// reintentando no lo es: la partida todavía tiene que llegar a Scala.
 func isFinal(status string) bool {
 	return status == StatusSent || status == StatusSendError || status == StatusAbandoned
 }

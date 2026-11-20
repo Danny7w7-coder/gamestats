@@ -45,13 +45,14 @@ func main() {
 	timeouts := pipeline.IdleTimeouts{Default: cfg.IdleTimeout, PerGame: cfg.GameIdleTimeouts}
 	dispatcher := newDispatcher(cfg, store, timeouts)
 
-	// WORKERS senders leen los lotes terminados y los envían a Scala.
+	// WORKERS senders leen los lotes terminados y los envían a Scala. Si
+	// Scala no responde, la partida se reenvía cada pipeline.ResendEvery.
 	// El WaitGroup permite esperar, al apagar, a que terminen de enviar.
 	var senders sync.WaitGroup
 	senders.Add(1)
 	go func() {
 		defer senders.Done()
-		pipeline.RunSenders(cfg.Workers, dispatcher.Out(), client.New(cfg.ScalaURL), store)
+		pipeline.RunSenders(cfg.Workers, dispatcher.Out(), client.New(cfg.ScalaURL), store, pipeline.ResendEvery)
 	}()
 
 	h := &api.Handler{Rejected: rejectedLog, Unknown: unknownLog, Store: store, Pipeline: dispatcher}
