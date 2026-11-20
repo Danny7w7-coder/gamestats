@@ -29,16 +29,16 @@ class FightingStatsSuite extends munit.FunSuite:
   test("ROUND_DRAW no suma para nadie"):
     assertEquals(FightingAnalyzer.roundWinners(validated("fighting_match_ok.json")), List(1 -> "p1", 3 -> "p1"))
 
-  test("p1: 265 de daño, 5 de 6 golpes conectaron, combo de 6"):
+  test("p1: 265 de daño, conectó 5 de 6 golpes sueltos y los 13 de sus combos, combo de 6"):
     val p1 = metricsOf(fight1, "p1")
     assertEquals(p1("damageDealt"), 265.0)
-    assertEqualsDouble(p1("accuracy"), 5.0 / 6, 1e-9)
+    assertEqualsDouble(p1("accuracy"), 18.0 / 19, 1e-9)
     assertEquals(p1("maxCombo"), 6.0)
     assertEquals((p1("blocks"), p1("knockdowns"), p1("roundsWon")), (2.0, 2.0, 2.0))
 
-  test("p2: falló 1 de sus 4 golpes -> precisión 0.75"):
+  test("p2: falló 1 de sus 4 golpes sueltos y conectó los 3 de su combo -> precisión 6/7"):
     val p2 = metricsOf(fight1, "p2")
-    assertEquals(p2("accuracy"), 0.75)
+    assertEqualsDouble(p2("accuracy"), 6.0 / 7, 1e-9)
     assertEquals(p2("damageDealt"), 140.0)
     assertEquals(p2("maxCombo"), 3.0)
     assertEquals(p2("roundsWon"), 0.0)
@@ -65,6 +65,13 @@ class FightingStatsSuite extends munit.FunSuite:
     val b = validated("fighting_comeback.json")
     val oneEach = b.copy(events = b.events.filterNot(_.action.exists { case RoundWon(3, _, _) => true; case _ => false }))
     assertEquals(FightingAnalyzer.winner(oneEach), None)
+
+  test("precisión: un combo cuenta sus golpes, aunque no haya ATTACK sueltos"):
+    val solo = FightingAnalyzer.accuracy(List(
+      Event("e1", java.time.Instant.EPOCH, "fighting", "1.0", "m", Some("p1"), EventType.PlayerAction,
+        Some(Combo("p2", 4, 40, 1)), ujson.Obj())
+    ))
+    assertEquals(solo, 1.0)
 
   test("COMBO_MASTER: un combo de 4 no alcanza"):
     assertEquals(gamestats.rules.ComboMasterRule.detect(validated("fighting_invalid_events.json")), Nil)
