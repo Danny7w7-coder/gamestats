@@ -2,8 +2,12 @@
 
 GameStats usa dos paradigmas a propósito: la ingestión está escrita en **Go** con un estilo imperativo y concurrente, y el análisis en **Scala** con un estilo funcional. Este documento recoge, para cada lado, las ventajas y limitaciones que aparecieron al implementarlo, con ejemplos del código del proyecto.
 
+**Contenido**
+
 - [Go — ingestión (imperativo)](#go--ingestión-imperativo)
+  - [Ventajas](#ventajas) · [Limitaciones](#limitaciones) · [¿Por qué HTTP entre Go y Scala?](#por-qué-http-entre-go-y-scala) · [Resumen](#resumen)
 - [Scala — análisis (funcional)](#scala--análisis-funcional)
+  - [Ventajas](#ventajas-1) · [Limitaciones](#limitaciones-1) · [Resumen](#resumen-1)
 
 ---
 

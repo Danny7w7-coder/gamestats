@@ -3,6 +3,18 @@
 Contrato compartido entre `ingestion-go` (Go) y `analytics-scala` (Scala).
 Si algo de aquí cambia, cambia en `main` y ambos lo traen con `git pull origin main`.
 
+Es lo que necesita saber un sistema externo (por ejemplo, los juegos de [GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)) para mandarle eventos a GameStats sin conocer cómo está hecho por dentro.
+
+**Contenido**
+
+1. [Schemas (JSON Schema 2020-12)](#schemas-json-schema-2020-12): el formato de un evento, del lote que Go manda a Scala y del resultado
+2. [Catálogo de eventos](#catálogo-de-eventos): los tipos y las acciones de cada juego
+3. [Validaciones de contexto](#validaciones-de-contexto): las reglas que revisan que un evento tenga sentido dentro de su partida
+4. [Quién valida qué](#quién-valida-qué): qué revisa Go y qué revisa Scala
+5. [Fixtures](#fixtures): las partidas de ejemplo que usan las pruebas de los dos módulos
+
+---
+
 ## Schemas (JSON Schema 2020-12)
 
 | Archivo | Qué describe |

@@ -6,6 +6,8 @@ El módulo `ingestion-go/` es la puerta de entrada de GameStats. Recibe los even
 
 Go **no calcula estadísticas**: esa parte es de Scala. Tampoco interpreta el campo `data` de los eventos, que se reenvía intacto.
 
+**Contenido**
+
 - [Qué hace](#qué-hace)
 - [Juegos](#juegos)
 - [Cómo correrlo](#cómo-correrlo)
@@ -83,7 +85,7 @@ go test ./...
 go test -race ./...   # necesita CGO (gcc); en Windows sin gcc se puede correr en Docker
 ```
 
-Para levantar todo el sistema (Go + Scala) con Docker, ver el [README principal](../README.md#cómo-correrlo).
+Para levantar todo el sistema (Go + Scala) con Docker, ver el [README principal](../README.md#2-probarlo-en-5-minutos).
 
 ### Variables de entorno
 

@@ -39,6 +39,13 @@ Se divide en dos servicios independientes que se comunican por HTTP con JSON:
 
 Cada lenguaje se usa donde su paradigma aporta más: Go para manejar muchos eventos concurrentes con goroutines y canales, y Scala para transformar colecciones de eventos en estadísticas sin estado mutable.
 
+### Versiones
+
+| Versión | Qué es |
+|---|---|
+| [`v1.0`](https://github.com/GameStats-Danny-Dylan/gamestats/tree/v1.0) | La entrega del **Proyecto 1**: los eventos los genera un simulador |
+| [`v1.1`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1) | La que usa **[GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)** (Proyecto 2), donde los eventos los generan juegos de verdad. Agrega estadísticas por juego y generales, partidas en curso por juego, juegos nuevos sin cambiar el código, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio de Go. El contrato de eventos es el mismo |
+
 ---
 
 ## 2. Probarlo en 5 minutos
@@ -123,7 +130,7 @@ flowchart LR
 1. Los eventos llegan a `POST /events` del servicio Go. Cada evento se valida por separado: uno inválido se rechaza (y se anota en un log) sin afectar a los demás.
 2. Go agrupa los eventos por `matchId`. Cuando llega `MATCH_FINISHED`, ordena los eventos por `timestamp` y envía la partida completa a Scala. Si Scala no responde o responde `5xx`, reintenta 3 veces (1, 2 y 4 s).
 3. Scala valida el lote en dos pasos: el formato de cada evento y su `data`, y después la coherencia con el resto de la partida (validaciones de contexto). Los eventos inválidos se descartan y quedan en el log. Luego elige el analizador del juego (`racing`, `fighting`, `connect4` o `tetris`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
-4. Los resultados se consultan en `GET /results` y `GET /players/{playerId}`.
+4. Los resultados se consultan en Scala con `GET /results`, `GET /players/{playerId}` y, desde la v1.1, `GET /stats/overview` y `GET /stats/games/{gameId}`. Go muestra el estado de cada partida (`GET /matches`) y, desde la v1.1, cuántas hay en curso por juego (`GET /games`). La lista completa está en la [sección 9](#9-endpoints).
 
 Se eligió HTTP entre los dos servicios porque cada envío devuelve una respuesta inmediata, con la que Go decide si la partida quedó enviada o si reintenta. La comparación con archivos compartidos o mensajería está en [`docs/imperativo-vs-funcional.md`](docs/imperativo-vs-funcional.md#por-qué-http-entre-go-y-scala).
 
@@ -318,7 +325,11 @@ docker load -i gamestats.tar
 | ingestion | `PORT` | `8080` | Puerto HTTP |
 | ingestion | `SCALA_URL` | `http://localhost:8081` | Dirección del servicio de análisis |
 | ingestion | `WORKERS` | `4` | Cuántos envíos a Scala en paralelo |
-| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala |
+| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala (para los juegos sin tiempo propio) |
+| ingestion | `IDLE_TIMEOUT_BY_GAME` | `tetris=1m,fighting=2m,connect4=15m` | **v1.1.** Tiempo distinto por juego; reemplaza o agrega a los de por defecto (un juego por turnos puede pasar más tiempo quieto) |
+| ingestion | `DATA_DIR` | vacío (sin persistencia) | **v1.1.** Carpeta donde Go guarda las partidas en curso; si se reinicia, las retoma (en los compose es el volumen `ingestion-data`) |
+
+El detalle de cada variable de Go está en [`docs/ingestion-go.md`](docs/ingestion-go.md).
 
 ---
 
@@ -334,14 +345,6 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 | `POST` | `/events` | Recibe un evento (`{...}`) o varios (`[...]`); responde cuántos aceptó y el motivo de cada rechazo |
 | `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada`, `error_envio` o `abandonada` (sin eventos durante `IDLE_TIMEOUT`) |
 | `GET` | `/games` | **v1.1.** Partidas en curso por juego (`[{"gameId":"connect4","inProgress":2}, …]`). Es estado del flujo de Go, no una estadística: las estadísticas siguen en Scala |
-
-**Configuración de Go en v1.1** (variables de entorno; detalle en [`docs/ingestion-go.md`](docs/ingestion-go.md)):
-
-| Variable | Por defecto | Qué hace |
-|---|---|---|
-| `IDLE_TIMEOUT` | `2m` | Una partida sin eventos durante ese tiempo se cierra como `abandonada` (para los juegos sin tiempo propio) |
-| `IDLE_TIMEOUT_BY_GAME` | `tetris=1m,fighting=2m,connect4=15m` | Tiempo distinto por juego; reemplaza o agrega a los de por defecto (un juego por turnos puede pasar más tiempo quieto) |
-| `DATA_DIR` | vacío (sin persistencia) | Carpeta donde Go guarda las partidas en curso; si se reinicia, las retoma (en los compose es el volumen `ingestion-data`) |
 
 **Análisis (Scala, puerto 8081)**
 
@@ -373,7 +376,7 @@ go test ./...
 
 Las pruebas son de tres niveles:
 
-1. **Unitarias de cada módulo**: Scala (117 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
+1. **Unitarias de cada módulo**: Scala (133 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
 2. **Fixtures compartidos** (`contracts/fixtures/`): los usan los dos módulos, así que si el contrato cambia, ambos lo detectan. Hay una partida válida o más por juego, con escenarios que disparan cada patrón, y una partida inválida por juego donde cada evento `bad-*` rompe una regla distinta.
 3. **De punta a punta**: el CD levanta el sistema completo, corre el simulador y verifica que lleguen las 30 partidas a Scala pasando por Go (ver la [sección 11](#11-cicd-y-deployment)).
 
@@ -415,8 +418,8 @@ En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG
 Para publicar una versión nueva:
 
 ```bash
-git tag v1.1
-git push origin v1.1
+git tag v1.2
+git push origin v1.2
 ```
 
 Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio.
