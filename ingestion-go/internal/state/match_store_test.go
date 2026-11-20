@@ -174,3 +174,25 @@ func TestConcurrentRecordAndGames(t *testing.T) {
 		t.Fatalf("Games() = %+v, se esperaba %+v", got, want)
 	}
 }
+
+// OnFinal se llama solo cuando la partida existe y queda en un estado final
+// (enviada, error_envio o abandonada), una vez por cambio.
+func TestOnFinal(t *testing.T) {
+	s := NewMatchStore()
+	var got []string
+	s.OnFinal(func(id string) { got = append(got, id) })
+
+	for _, id := range []string{"a", "b", "c", "d"} {
+		s.Record(ev(id, "MATCH_STARTED", ""))
+	}
+	s.SetStatus("a", StatusFinished) // no es final: falta enviarla
+	s.SetStatus("a", StatusSent)
+	s.SetStatus("b", StatusSendError)
+	s.SetStatus("c", StatusAbandoned)
+	s.SetStatus("zz", StatusSent) // no existe
+	s.Record(ev("d", "MATCH_FINISHED", ""))
+
+	if want := []string{"a", "b", "c"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("OnFinal llamado con %v, se esperaba %v", got, want)
+	}
+}

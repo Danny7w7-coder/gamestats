@@ -15,7 +15,7 @@ func defaultsByGame() map[string]time.Duration {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	for _, k := range []string{"PORT", "SCALA_URL", "WORKERS", "IDLE_TIMEOUT", "IDLE_TIMEOUT_BY_GAME"} {
+	for _, k := range []string{"PORT", "SCALA_URL", "WORKERS", "IDLE_TIMEOUT", "IDLE_TIMEOUT_BY_GAME", "DATA_DIR"} {
 		t.Setenv(k, "")
 	}
 
@@ -36,6 +36,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("WORKERS", "8")
 	t.Setenv("IDLE_TIMEOUT", "30s")
 	t.Setenv("IDLE_TIMEOUT_BY_GAME", "")
+	t.Setenv("DATA_DIR", " /app/data ")
 
 	cfg, err := Load()
 	if err != nil {
@@ -43,7 +44,7 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	// IDLE_TIMEOUT solo cambia "el resto": los juegos con valor propio no se mueven.
 	want := Config{Port: "9090", ScalaURL: "http://analytics:8081", Workers: 8,
-		IdleTimeout: 30 * time.Second, GameIdleTimeouts: defaultsByGame()}
+		IdleTimeout: 30 * time.Second, GameIdleTimeouts: defaultsByGame(), DataDir: "/app/data"}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Load() = %+v, se esperaba %+v", cfg, want)
 	}

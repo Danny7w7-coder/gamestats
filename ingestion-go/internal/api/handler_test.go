@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"gamestats/ingestion/internal/persist"
 	"gamestats/ingestion/internal/pipeline"
 	"gamestats/ingestion/internal/rejected"
 	"gamestats/ingestion/internal/state"
@@ -310,5 +311,76 @@ func TestGames(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `{"gameId":"connect4","inProgress":2}`) {
 		t.Fatalf("formato JSON inesperado: %s", rec.Body.String())
+	}
+}
+
+// newPersistentHandler arma un Handler con DATA_DIR=dataDir, como main.
+// Devuelve una función que lo apaga como un apagado ordenado.
+func newPersistentHandler(t *testing.T, dataDir string) (*Handler, pipeline.Restored, func()) {
+	t.Helper()
+	dir := t.TempDir()
+	l, err := rejected.New(filepath.Join(dir, "rejected.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := persist.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewMatchStore()
+	d, r, err := pipeline.NewPersistent(store, pipeline.Uniform(time.Hour), j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drained := make(chan struct{})
+	go func() {
+		for range d.Out() {
+		}
+		close(drained)
+	}()
+	stop := func() {
+		d.Close()
+		<-drained
+		l.Close()
+	}
+	return &Handler{Rejected: l, Store: store, Pipeline: d}, r, stop
+}
+
+// Reinicio a mitad de partida visto desde HTTP: tras reiniciar con el mismo
+// DATA_DIR, GET /matches y GET /games muestran la partida en curso y los
+// eventos siguientes se aceptan (no son "partida desconocida").
+func TestRestartKeepsMatchesInProgress(t *testing.T) {
+	dataDir := t.TempDir()
+
+	h1, _, stop1 := newPersistentHandler(t, dataDir)
+	startRace(t, h1)
+	if resp := postEvents(h1, validEv); !strings.Contains(resp.Body.String(), `"accepted":1`) {
+		t.Fatalf("POST /events = %s", resp.Body.String())
+	}
+	stop1()
+
+	h2, r, stop2 := newPersistentHandler(t, dataDir)
+	defer stop2()
+	if r.InProgress != 1 || r.Events != 2 {
+		t.Fatalf("Restored = %+v", r)
+	}
+
+	rec := httptest.NewRecorder()
+	h2.Matches(rec, httptest.NewRequest(http.MethodGet, "/matches", nil))
+	var matches []state.MatchInfo
+	json.Unmarshal(rec.Body.Bytes(), &matches)
+	want := []state.MatchInfo{{MatchID: "race-001", GameID: "racing", Status: state.StatusInProgress, EventCount: 2, ConnectedPlayers: []string{}}}
+	if !reflect.DeepEqual(matches, want) {
+		t.Fatalf("GET /matches = %+v, se esperaba %+v", matches, want)
+	}
+	if got := strings.TrimSpace(getGames(h2).Body.String()); got != `[{"gameId":"racing","inProgress":1}]` {
+		t.Fatalf("GET /games = %s", got)
+	}
+
+	next := strings.Replace(validEv, `"e1"`, `"e2"`, 1)
+	var resp eventsResponse
+	json.Unmarshal(postEvents(h2, next).Body.Bytes(), &resp)
+	if resp.Accepted != 1 || len(resp.Rejected) != 0 {
+		t.Fatalf("evento tras el reinicio: %+v", resp)
 	}
 }

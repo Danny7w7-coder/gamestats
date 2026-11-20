@@ -15,6 +15,7 @@ import (
 	"gamestats/ingestion/internal/api"
 	"gamestats/ingestion/internal/client"
 	"gamestats/ingestion/internal/config"
+	"gamestats/ingestion/internal/persist"
 	"gamestats/ingestion/internal/pipeline"
 	"gamestats/ingestion/internal/rejected"
 	"gamestats/ingestion/internal/state"
@@ -42,7 +43,7 @@ func main() {
 
 	store := state.NewMatchStore()
 	timeouts := pipeline.IdleTimeouts{Default: cfg.IdleTimeout, PerGame: cfg.GameIdleTimeouts}
-	dispatcher := pipeline.New(store, timeouts)
+	dispatcher := newDispatcher(cfg, store, timeouts)
 
 	// WORKERS senders leen los lotes terminados y los envían a Scala.
 	// El WaitGroup permite esperar, al apagar, a que terminen de enviar.
@@ -99,4 +100,28 @@ func main() {
 	// 3. Esperar a que los senders envíen los lotes que quedaban pendientes.
 	senders.Wait()
 	log.Print("apagado completo")
+}
+
+// newDispatcher crea el pipeline. Con DATA_DIR, guarda en disco las partidas
+// en curso y, al arrancar, restaura las que quedaron de la ejecución anterior.
+func newDispatcher(cfg config.Config, store *state.MatchStore, timeouts pipeline.IdleTimeouts) *pipeline.Dispatcher {
+	if cfg.DataDir == "" {
+		log.Print("DATA_DIR vacía: las partidas en curso solo viven en memoria (se pierden al reiniciar)")
+		return pipeline.New(store, timeouts)
+	}
+
+	journal, err := persist.Open(cfg.DataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dispatcher, r, err := pipeline.NewPersistent(store, timeouts, journal)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("DATA_DIR=%s: %d partidas restauradas (%d en curso, %d ya terminadas que se envían a Scala; %d eventos)",
+		cfg.DataDir, r.InProgress+r.Finished, r.InProgress, r.Finished, r.Events)
+	if r.Skipped > 0 || r.Discarded > 0 {
+		log.Printf("DATA_DIR: %d líneas o eventos no se pudieron restaurar y %d archivos se apartaron (ver avisos)", r.Skipped, r.Discarded)
+	}
+	return dispatcher
 }
