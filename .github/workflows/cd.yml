@@ -134,6 +134,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Las imágenes están en la cuenta dueña del repo (GHCR solo acepta minúsculas).
+      - name: Cuenta de GHCR
+        run: echo "GAMESTATS_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
       - name: Descargar las imágenes publicadas (${{ env.GAMESTATS_TAG }})
         run: docker compose -f docker-compose.deploy.yml --profile sim pull
 

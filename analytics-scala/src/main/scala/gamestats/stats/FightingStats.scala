@@ -37,9 +37,16 @@ object FightingAnalyzer extends GameAnalyzer:
       case Combo(_, _, d, _)     => d
     }
 
-  /** Golpes sueltos (ATTACK): si conectaron o no. Un combo siempre conecta. */
+  /**
+   * Cada golpe: si conectó o no. Un ATTACK es un golpe; un COMBO de N golpes son
+   * N golpes que conectaron (un juego manda el combo en lugar de sus ATTACK).
+   */
   val strikes: List[Event] => List[Boolean] =
-    _.flatMap(_.action).collect { case Attack(_, _, hit, _, _) => hit }
+    _.flatMap(_.action).flatMap {
+      case Attack(_, _, hit, _, _) => List(hit)
+      case Combo(_, hits, _, _)    => List.fill(hits)(true)
+      case _                       => Nil
+    }
 
   val damageDealt: List[Event] => Double = damages andThen (_.sum.toDouble)
 
