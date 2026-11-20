@@ -220,11 +220,12 @@ Devuelve, por cada juego, cuántas partidas están `en_curso` en este momento. D
 | 6 | En `PLAYER_ACTION` hay una `action`. En un juego conocido, además, no es una acción de **otro** juego del catálogo (en un juego desconocido solo se exige que no esté vacía) | `la acción "CONNECT_FOUR" no existe en el juego "racing" (es una acción de "connect4")` |
 | 7 | `action` solo aparece en `PLAYER_ACTION` (acordado con Danny en el contrato) | `action solo se permite en PLAYER_ACTION (llegó en PLAYER_JOINED)` |
 
-Hay tres motivos de rechazo más, que no vienen de `Validate`:
+Hay cuatro motivos de rechazo más, que no vienen de `Validate`:
 
 - **Formato:** el evento no se puede decodificar, por ejemplo `"timestamp": 5`. Se rechaza ese evento y los demás siguen.
 - **Partida ya finalizada:** llega un evento de una partida que ya recibió `MATCH_FINISHED`. Su lote ya se armó, así que el evento se rechaza (ver [Concurrencia](#concurrencia)).
 - **Partida abandonada por inactividad:** llega un evento de una partida que se abandonó por inactividad (ver [Tiempo de espera por juego](#tiempo-de-espera-por-juego)).
+- **Partida desconocida:** llega un evento de una partida que ingestion no conoce y no es su `MATCH_STARTED`. Se rechaza con `partida desconocida: no se vio MATCH_STARTED` y **no** crea la partida (ver [Partidas desconocidas](#partidas-desconocidas)).
 
 ### Acciones desconocidas
 
@@ -274,7 +275,7 @@ POST /events ──▶ [in] ──▶ router ──┬──▶ goroutine partid
 | Pieza | Qué hace |
 |---|---|
 | **Handler** (`api/handler.go`) | Valida el evento y llama a `Submit`, que lo pone en el canal `in` y espera la respuesta del router. |
-| **Router** (una goroutine, `dispatcher.go`) | Lee de `in`. Si la partida ya terminó o se abandonó, rechaza el evento. Si no, lo registra en el store y lo pasa al canal de su partida, creando la goroutine de la partida si es la primera vez que la ve. Además revisa periódicamente las partidas inactivas (ver [Abandono por inactividad](#abandono-por-inactividad)). |
+| **Router** (una goroutine, `dispatcher.go`) | Lee de `in`. Si la partida ya terminó o se abandonó, o si es desconocida y el evento no es `MATCH_STARTED`, rechaza el evento. Si no, lo registra en el store y lo pasa al canal de su partida, creando la goroutine de la partida si es la primera vez que la ve. Además revisa periódicamente las partidas inactivas (ver [Abandono por inactividad](#abandono-por-inactividad)). |
 | **Goroutine por partida** (`collect`) | Acumula los eventos de **una** partida. Cuando su canal se cierra después de `MATCH_FINISHED`, ordena los eventos con `sort.SliceStable` por `timestamp`, arma el `Batch` y lo envía a `out`. Después termina. |
 | **Senders** (`WORKERS` goroutines, `sender.go`) | Leen de `out` y envían cada lote a Scala. Todos leen del mismo canal, y Go garantiza que cada lote lo recibe un solo sender. |
 
@@ -310,6 +311,16 @@ Si llega un evento de una partida que ya recibió `MATCH_FINISHED`, el router lo
 
 `Submit` espera la respuesta del router porque solo él conoce el orden real de llegada. Así `POST /events` puede decir con exactitud qué eventos se rechazaron.
 
+### Partidas desconocidas
+
+Una partida solo se crea con su `MATCH_STARTED`. Si el primer evento que ingestion ve de un `matchId` es cualquier otro (un `PLAYER_ACTION`, un `PLAYER_JOINED`, incluso un `MATCH_FINISHED`), el router responde `ErrUnknownMatch`, el evento se anota en `rejected.jsonl` como cualquier otro rechazo y la partida **no** se crea: no aparece en `GET /matches` ni en `GET /games` y no tiene goroutine.
+
+```json
+{"received":1,"accepted":0,"rejected":[{"eventId":"x-e40","reason":"partida desconocida: no se vio MATCH_STARTED"}]}
+```
+
+Es una red de seguridad. Sin ella, si ingestion se reiniciaba a mitad de una partida (y no tenía `DATA_DIR`), creaba la partida con los eventos que llegaban desde ese momento y la mandaba a Scala **truncada**, con estadísticas falsas (una duración de 3 s, rondas ganadas de menos, etc.). Es preferible perder la partida a analizarla mal. El simulador y los escenarios siempre mandan `MATCH_STARTED` primero (lo comprueba `TestCorruptKeepsMatchStartedFirst`: ni siquiera los eventos dañados a propósito pueden adelantarse a él, porque todos fallan la validación).
+
 ### Abandono por inactividad
 
 Si una partida pasa el timeout de su juego sin recibir eventos (1 minuto en tetris, 2 en fighting, 15 en connect4 y `IDLE_TIMEOUT` en el resto, ver [Tiempo de espera por juego](#tiempo-de-espera-por-juego)), se marca como `abandonada` y **no se envía a Scala**, porque está incompleta. Se mide con la hora real del servidor al recibir cada evento, no con el `timestamp` del evento.
@@ -343,7 +354,7 @@ Un segundo Ctrl+C cierra el programa de inmediato. Si Scala está caído al apag
 ### Cómo se comprueba
 
 - `go test -race ./...` corre todos los tests con el detector de data races. También corre en el CI (`.github/workflows/ci-go.yml`).
-- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`), que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`) y los timeouts distintos por juego (`TestIdleTimeoutPerGame`, `TestIdleTimeoutDefaultForUnlistedGame`).
+- `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, el rechazo de una partida que no empezó con `MATCH_STARTED` (`TestUnknownMatchRejected`), los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`), que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`) y los timeouts distintos por juego (`TestIdleTimeoutPerGame`, `TestIdleTimeoutDefaultForUnlistedGame`).
 - `pipeline/sender_test.go` comprueba que, al cerrar el pipeline, los lotes pendientes se envían igual a un Scala lento antes de que los senders terminen (`TestCloseSendsPendingBatches`).
 - El simulador manda cada partida desde su propia goroutine, así que los eventos llegan intercalados al servidor.
 
@@ -363,7 +374,7 @@ Un segundo Ctrl+C cierra el programa de inmediato. Si Scala está caído al apag
 }
 ```
 
-- `startedAt` es el timestamp de `MATCH_STARTED`, o el del primer evento si nunca llegó. `finishedAt` es el de `MATCH_FINISHED`.
+- `startedAt` es el timestamp de `MATCH_STARTED` (siempre está: una partida no se crea sin él, ver [Partidas desconocidas](#partidas-desconocidas)). `finishedAt` es el de `MATCH_FINISHED`.
 - `players` son los `playerId` distintos, ordenados.
 - El `http.Client` tiene un timeout de 10 s, para que un Scala colgado no deje al sender esperando para siempre.
 

@@ -39,6 +39,12 @@ var ErrMatchFinished = errors.New("partida ya finalizada")
 // abandonó por inactividad.
 var ErrMatchAbandoned = errors.New("partida abandonada por inactividad")
 
+// ErrUnknownMatch se devuelve cuando el primer evento que se ve de una partida
+// no es MATCH_STARTED: la partida empezó sin que ingestion la viera (por
+// ejemplo, antes de un reinicio). Si se aceptara, se mandaría a Scala una
+// partida truncada con estadísticas falsas, así que se rechaza y no se crea.
+var ErrUnknownMatch = errors.New("partida desconocida: no se vio MATCH_STARTED")
+
 // outBuffer deja que unas cuantas partidas terminadas esperen en el canal de
 // salida si los senders están ocupados (por ejemplo, reintentando con Scala).
 const outBuffer = 16
@@ -79,8 +85,9 @@ func New(store *state.MatchStore, timeouts IdleTimeouts) *Dispatcher {
 }
 
 // Submit entrega un evento (ya validado) al router y espera su respuesta:
-// nil si lo aceptó, o ErrMatchFinished / ErrMatchAbandoned si la partida ya
-// no está en curso.
+// nil si lo aceptó, ErrMatchFinished / ErrMatchAbandoned si la partida ya
+// no está en curso, o ErrUnknownMatch si es el primer evento de una partida
+// y no es MATCH_STARTED.
 // Se espera la respuesta porque solo el router conoce el orden real de
 // llegada, y así POST /events puede informar el rechazo con exactitud.
 // No se debe llamar después de Close.
@@ -151,11 +158,16 @@ func (d *Dispatcher) route() {
 func (d *Dispatcher) dispatch(e model.Event, matches map[string]*openMatch, wg *sync.WaitGroup) error {
 	// Evento tardío: si la partida ya no está en curso, su lote ya salió (o
 	// se abandonó). Se rechaza y NO se crea una goroutine nueva.
-	if status, ok := d.store.Status(e.MatchID); ok && status != state.StatusInProgress {
+	status, known := d.store.Status(e.MatchID)
+	if known && status != state.StatusInProgress {
 		if status == state.StatusAbandoned {
 			return ErrMatchAbandoned
 		}
 		return ErrMatchFinished
+	}
+	// Partida que el store no conoce: solo MATCH_STARTED puede crearla.
+	if !known && e.Type != validation.TypeMatchStarted {
+		return ErrUnknownMatch
 	}
 
 	// El router es el único que registra eventos en el store, así el
@@ -233,7 +245,7 @@ func buildBatch(events []model.Event) model.Batch {
 		MatchID:     first.MatchID,
 		GameID:      first.GameID,
 		GameVersion: first.GameVersion,
-		StartedAt:   first.Timestamp, // si nunca llegó MATCH_STARTED, el primer evento
+		StartedAt:   first.Timestamp, // se reemplaza abajo por el de MATCH_STARTED
 		Players:     []string{},
 		Events:      events,
 	}

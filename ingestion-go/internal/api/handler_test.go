@@ -49,6 +49,21 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 	return &Handler{Rejected: l, Unknown: unknown, Store: store, Pipeline: d}, path
 }
 
+// startEv es el MATCH_STARTED de race-001: sin él, ingestion rechaza los
+// eventos de esa partida (partida desconocida).
+const startEv = `{"eventId":"s0","timestamp":"2026-10-05T14:00:00Z","gameId":"racing",
+	"gameVersion":"1.0","matchId":"race-001","type":"MATCH_STARTED","data":{}}`
+
+// startRace manda el MATCH_STARTED de race-001 y comprueba que se aceptó.
+func startRace(t *testing.T, h *Handler) {
+	t.Helper()
+	var resp eventsResponse
+	rec := postEvents(h, startEv)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Accepted != 1 {
+		t.Fatalf("MATCH_STARTED de race-001 no se aceptó: %s", rec.Body.String())
+	}
+}
+
 func postEvents(h *Handler, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/events", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -83,6 +98,7 @@ func TestEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, logPath := newTestHandler(t)
+			startRace(t, h)
 			rec := postEvents(h, tt.body)
 
 			if rec.Code != tt.wantStatus {
@@ -126,7 +142,7 @@ func TestEventsRejectedReason(t *testing.T) {
 func TestMatchesAfterEvents(t *testing.T) {
 	h, _ := newTestHandler(t)
 	goalInRacing := strings.Replace(validEv, `"LAP_COMPLETED"`, `"CONNECT_FOUR"`, 1)
-	postEvents(h, "["+validEv+","+goalInRacing+"]")
+	postEvents(h, "["+startEv+","+validEv+","+goalInRacing+"]")
 
 	req := httptest.NewRequest(http.MethodGet, "/matches", nil)
 	rec := httptest.NewRecorder()
@@ -136,7 +152,7 @@ func TestMatchesAfterEvents(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("respuesta no es JSON: %v", err)
 	}
-	if len(got) != 1 || got[0].MatchID != "race-001" || got[0].EventCount != 1 || got[0].Status != state.StatusInProgress {
+	if len(got) != 1 || got[0].MatchID != "race-001" || got[0].EventCount != 2 || got[0].Status != state.StatusInProgress {
 		t.Fatalf("GET /matches = %+v", got)
 	}
 }
@@ -145,6 +161,7 @@ func TestMatchesAfterEvents(t *testing.T) {
 // petición) se rechaza con "partida ya finalizada" y se anota en el log.
 func TestLateEventRejected(t *testing.T) {
 	h, logPath := newTestHandler(t)
+	startRace(t, h)
 	finished := `{"eventId":"f","timestamp":"2026-10-05T14:05:00Z","gameId":"racing",
 		"gameVersion":"1.0","matchId":"race-001","type":"MATCH_FINISHED"}`
 	rec := postEvents(h, "["+validEv+","+finished+","+validEv+"]")
@@ -158,6 +175,36 @@ func TestLateEventRejected(t *testing.T) {
 	data, _ := os.ReadFile(logPath)
 	if !strings.Contains(string(data), "partida ya finalizada") {
 		t.Fatalf("el log no tiene el rechazo: %s", data)
+	}
+}
+
+// Un evento de una partida que nunca mandó MATCH_STARTED se rechaza con un
+// motivo claro, se anota en el log de rechazados y no crea la partida (no
+// aparece en GET /matches ni en GET /games).
+func TestEventWithoutMatchStartedRejected(t *testing.T) {
+	h, logPath := newTestHandler(t)
+	finished := `{"eventId":"f","timestamp":"2026-10-05T14:05:00Z","gameId":"racing",
+		"gameVersion":"1.0","matchId":"race-001","type":"MATCH_FINISHED"}`
+	rec := postEvents(h, "["+validEv+","+finished+"]")
+
+	var resp eventsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	const reason = "partida desconocida: no se vio MATCH_STARTED"
+	want := []rejection{{EventID: "e1", Reason: reason}, {EventID: "f", Reason: reason}}
+	if rec.Code != http.StatusOK || resp.Accepted != 0 || !reflect.DeepEqual(resp.Rejected, want) {
+		t.Fatalf("status %d, respuesta = %+v", rec.Code, resp)
+	}
+	data, _ := os.ReadFile(logPath)
+	if strings.Count(string(data), reason) != 2 {
+		t.Fatalf("el log no tiene los 2 rechazos: %s", data)
+	}
+	if got := h.Store.List(); len(got) != 0 {
+		t.Fatalf("GET /matches = %+v, no debía crearse la partida", got)
+	}
+	if got := strings.TrimSpace(getGames(h).Body.String()); got != "[]" {
+		t.Fatalf("GET /games = %s, se esperaba []", got)
 	}
 }
 
@@ -175,6 +222,7 @@ func TestEventsBodyTooLarge(t *testing.T) {
 // sigue rechazando.
 func TestUnknownActionAcceptedWithWarning(t *testing.T) {
 	h, path := newTestHandler(t)
+	startRace(t, h)
 	unknownEv := strings.Replace(validEv, `"LAP_COMPLETED"`, `"BOOST_JUMP"`, 1)
 	otherGameEv := strings.Replace(strings.Replace(validEv, `"LAP_COMPLETED"`, `"TOP_OUT"`, 1), `"e1"`, `"e2"`, 1)
 
