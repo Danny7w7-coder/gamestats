@@ -91,6 +91,38 @@ class SummariesSuite extends munit.FunSuite:
     // x: 1/2, y: 1/3, z: 1/1
     assertEquals(Summaries.standings(ms, withMetrics = false).map(_.playerId), List("z", "x", "y"))
 
+  test("standings: una partida cortada va a 'interrupted', no a ganadas, perdidas ni noResult"):
+    val cut = m("f-1", "fighting", 40, 30, None, List("ana" -> Map(), "beto" -> Map()))
+    val ms = List(
+      cut.copy(matchStats = cut.matchStats.copy(interrupted = true)),                     // se cerró a la mitad
+      m("f-2", "fighting", 90, 60, None, List("ana" -> Map(), "beto" -> Map())),          // empate completo
+      m("f-3", "fighting", 90, 60, Some("ana"), List("ana" -> Map(), "beto" -> Map())))
+    val s = Summaries.standings(ms, withMetrics = false)
+    val ana = s.find(_.playerId == "ana").get
+    val beto = s.find(_.playerId == "beto").get
+    assertEquals((ana.played, ana.wins, ana.losses, ana.noResult, ana.interrupted, ana.winRate), (3, 1, 0, 1, 1, 0.33))
+    assertEquals((beto.played, beto.wins, beto.losses, beto.noResult, beto.interrupted), (3, 0, 1, 1, 1))
+    assertEquals(Codecs.encodeStanding(ana)("interrupted").num, 1.0)
+
+  test("interrupted: MATCH_FINISHED con reason stopped, o sin motivo después de un PLAYER_LEFT"):
+    val b = AnalyticsRoutes.parseBody(Fixtures.text("fighting_comeback.json")).fold(fail(_), identity)
+    val finished = b.events.last
+    assertEquals(finished.eventType, EventType.MatchFinished)
+    assertEquals(GenericStats.interrupted(b), false) // terminó normal
+    val stopped = b.copy(events = b.events.init :+ finished.copy(data = ujson.Obj("reason" -> "stopped")))
+    assertEquals(GenericStats.interrupted(stopped), true)
+    val normal = b.copy(events = b.events.init :+ finished.copy(data = ujson.Obj("reason" -> "normal")))
+    assertEquals(GenericStats.interrupted(normal), false)
+    // Cierre de respaldo de la consola: PLAYER_LEFT y MATCH_FINISHED sin data.
+    val left = finished.copy(eventId = "left", eventType = EventType.PlayerLeft, playerId = Some("p3"), data = ujson.Obj())
+    val backup = b.copy(events = b.events.init :+ left :+ finished.copy(data = ujson.Obj()))
+    assertEquals(GenericStats.interrupted(backup), true)
+
+  test("decode: un resultado guardado antes de v1.3 (sin 'interrupted') se lee como no cortado"):
+    val json = Codecs.encode(all.head)
+    json("matchStats").obj.remove("interrupted")
+    assertEquals(Codecs.decodeAnalysis(json).map(_.matchStats.interrupted), Right(false))
+
   test("rank desempata por nombre"):
     assertEquals(Summaries.rank(List("b", "a", "b", "c", "a")), List(Ranked("a", 2), Ranked("b", 2), Ranked("c", 1)))
 

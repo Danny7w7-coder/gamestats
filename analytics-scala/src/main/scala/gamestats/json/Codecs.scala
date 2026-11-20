@@ -204,7 +204,8 @@ object Codecs:
       "playerCount"     -> ujson.Num(m.playerCount),
       "eventsByAction"  -> sortedObj(m.eventsByAction)(n => ujson.Num(n)),
       // winner siempre se escribe; None -> null (empate o sin datos).
-      "winner"          -> m.winner.fold[ujson.Value](ujson.Null)(ujson.Str(_))
+      "winner"          -> m.winner.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
+      "interrupted"     -> ujson.Bool(m.interrupted)
     )
 
   def encodePattern(p: Pattern): ujson.Value =
@@ -254,6 +255,7 @@ object Codecs:
       "wins"     -> ujson.Num(s.wins),
       "losses"   -> ujson.Num(s.losses),
       "noResult" -> ujson.Num(s.noResult),
+      "interrupted" -> ujson.Num(s.interrupted),
       "winRate"  -> ujson.Num(s.winRate),
       "metrics"  -> sortedObj(s.metrics)(encodeMetricSummary)
     )
@@ -291,7 +293,9 @@ object Codecs:
       players    <- int(f, "playerCount")
       byAction   <- get(f, "eventsByAction").flatMap(asObject(_, "'eventsByAction'")).flatMap(intValues)
       winner     <- optStr(f, "winner")
-    yield MatchStats(duration, total, players, byAction, winner)
+      // v1.3: los resultados guardados antes no traen 'interrupted' -> false.
+      interrupted = f.get("interrupted").flatMap(_.boolOpt).getOrElse(false)
+    yield MatchStats(duration, total, players, byAction, winner, interrupted)
 
   private def decodePlayerStats(json: ujson.Value): Result[PlayerStats] =
     for

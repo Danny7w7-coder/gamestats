@@ -12,14 +12,15 @@ case class Ranked(name: String, count: Int)
 case class MetricSummary(avg: Double, min: Double, max: Double)
 
 /** Una fila de la clasificación: cómo le fue a un jugador en las partidas terminadas.
-  * played = wins + losses + noResult.
+  * played = wins + losses + noResult + interrupted.
   */
 case class Standing(
     playerId: String,
     played: Int,                         // partidas en las que jugó
     wins: Int,
     losses: Int,                         // partidas con ganador, y no fue él
-    noResult: Int,                       // partidas sin ganador (empate, abandono, de un solo jugador)
+    noResult: Int,                       // jugadas hasta el final sin ganador (empate, o de un solo jugador)
+    interrupted: Int,                    // v1.3: cerradas antes de terminar (sin ganador)
     winRate: Double,                     // wins / played, de 0 a 1 con 2 decimales
     metrics: Map[String, MetricSummary]  // sus métricas (vacío en el resumen general: mezclaría juegos)
 )

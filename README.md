@@ -45,13 +45,14 @@ Cada lenguaje se usa donde su paradigma aporta más: Go para manejar muchos even
 |---|---|
 | [`v1.0`](https://github.com/GameStats-Danny-Dylan/gamestats/tree/v1.0) | La entrega del **Proyecto 1**: los eventos los genera un simulador |
 | [`v1.1`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1) | Para **[GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)** (Proyecto 2), donde los eventos los generan juegos de verdad. Agrega estadísticas por juego y generales, partidas en curso por juego, juegos nuevos sin cambiar el código, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio de Go. El contrato de eventos es el mismo |
-| [`v1.2`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2) | **La que usa GameConsole hoy.** Igual que la `v1.1`, y además una partida que no llega a Scala ya no se pierde: queda `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba |
+| [`v1.2`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2) | Igual que la `v1.1`, y además una partida que no llega a Scala ya no se pierde: queda `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba |
+| [`v1.3`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.3) | **La que usa GameConsole hoy.** Una partida cerrada antes de terminar queda marcada como cortada (`interrupted`) y en la clasificación va en su propia columna, no como ganada, perdida ni empate. Una pelea cortada a la mitad ya no tiene ganador |
 
 ---
 
 ## 2. Probarlo en 5 minutos
 
-Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.2`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
+Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.3`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
 
 - **Solo hace falta [Docker](https://www.docker.com/)** (en Windows y Mac, Docker Desktop abierto).
 - No hace falta Java, sbt ni Go, no se compila nada y no se necesita ningún archivo del repositorio.
@@ -161,7 +162,7 @@ GameStats analiza cuatro juegos con estructuras distintas, para comprobar que el
 | Tiempo | Continuo (vueltas) | Continuo, dividido en rounds | Por turnos | Continuo (pieza a pieza) |
 | Qué se mide | Tiempos de vuelta y posiciones | Daño, golpes y rounds | Fichas, amenazas y bloqueos | Puntaje, líneas y piezas |
 | Interacción entre jugadores | Indirecta (adelantar, chocar) | Directa (cada golpe tiene un objetivo) | Directa (tapar la jugada del rival) | Ninguna |
-| Cómo se decide el ganador | Orden de llegada (`ranking`) | Quien gana más rounds; puede haber empate | Quien hace 4 en línea; tablero lleno = empate | No hay ganador (`null`): se juega contra uno mismo |
+| Cómo se decide el ganador | Orden de llegada (`ranking`) | Quien gana más rounds, si la pelea se decidió (llegó a la mayoría o se jugaron todos); cortada a la mitad o empatada, no hay ganador | Quien hace 4 en línea; tablero lleno = empate | No hay ganador (`null`): se juega contra uno mismo |
 
 ### Tipos de evento (comunes a todos los juegos)
 
@@ -225,7 +226,7 @@ Un **juego nuevo** tampoco obliga a reescribir el sistema. Desde la v1.1, Scala 
 | | Por jugador | Por partida | Patrones |
 |---|---|---|---|
 | **Racing** | Mejor vuelta, promedio, consistencia (desviación estándar de las vueltas), penalización, tiempo efectivo (vueltas + penalización), adelantamientos, choques provocados, vueltas lideradas | Duración, ganador (primero del `ranking`), eventos por acción | `COMEBACK`: el ganador estuvo 3.º o peor · `CLEAN_RACE`: el ganador no tuvo choques ni penalizaciones · `WIRE_TO_WIRE`: el ganador fue 1.º toda la carrera |
-| **Fighting** | Daño hecho, precisión (golpes que conectaron / intentados; cada golpe de un `COMBO` cuenta como uno que conectó), combo más largo, bloqueos, derribos, rounds ganados | Duración, ganador (más rounds; `null` en empate) | `COMEBACK`: perdió el primer round y ganó la pelea · `FLAWLESS_VICTORY`: ganó un round sin recibir daño · `COMBO_MASTER`: combo de 5 golpes o más |
+| **Fighting** | Daño hecho, precisión (golpes que conectaron / intentados; cada golpe de un `COMBO` cuenta como uno que conectó), combo más largo, bloqueos, derribos, rounds ganados | Duración, ganador (más rounds, si llegó a la mayoría o se jugaron todos; `null` en empate o si la pelea se cortó antes, por ejemplo al cerrarla) | `COMEBACK`: perdió el primer round y ganó la pelea · `FLAWLESS_VICTORY`: ganó un round sin recibir daño · `COMBO_MASTER`: combo de 5 golpes o más |
 | **Connect4** | Fichas, amenazas creadas, amenazas tapadas, control del centro (proporción de fichas en la columna 4), pistas, deshacer, turnos perdidos | Duración, ganador (quien hace 4 en línea; `null` en empate) | `DOUBLE_THREAT`: dos amenazas abiertas a la vez · `QUICK_WIN`: ganó con 7 fichas o menos · `PERFECT_DEFENSE`: tapó todas las amenazas del rival (al menos 2) |
 | **Tetris** | Puntaje, líneas, tetris (4 líneas de una vez), piezas colocadas, piezas por minuto, nivel máximo, combo máximo, T-spins, hard drops | Duración, eventos por acción (sin ganador) | `BACK_TO_BACK`: dos tetris seguidos · `PERFECT_CLEAR`: tablero vacío · `T_SPIN_MASTER`: 3 T-spins o más |
 
@@ -357,7 +358,7 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 | `GET` | `/results/{matchId}` | El resultado de una partida (`404` si no existe) |
 | `GET` | `/players/{playerId}` | Estadísticas de un jugador en todas sus partidas, de cualquier juego (`404` si no jugó) |
 | `GET` | `/stats/overview` | **v1.1.** Totales de todas las partidas (partidas, jugadores, eventos, duración promedio, ganadores y patrones más frecuentes), la clasificación general (`standings`) y un resumen por juego |
-| `GET` | `/stats/games/{gameId}` | **v1.1.** Un juego: partidas terminadas, jugadores, promedios, partidas sin ganador, ranking de ganadores, promedio/mínimo/máximo de cada métrica, acciones, patrones y clasificación (`standings`: por jugador, partidas, ganadas, perdidas, sin ganador, % de victorias y sus métricas). Un juego sin partidas responde todo en `0` |
+| `GET` | `/stats/games/{gameId}` | **v1.1.** Un juego: partidas terminadas, jugadores, promedios, partidas sin ganador, ranking de ganadores, promedio/mínimo/máximo de cada métrica, acciones, patrones y clasificación (`standings`: por jugador, partidas, ganadas, perdidas, sin ganador (`noResult`: jugadas hasta el final sin ganador), cortadas (`interrupted`, v1.3: cerradas antes de terminar), % de victorias y sus métricas). Un juego sin partidas responde todo en `0` |
 
 Quién valida qué (Go o Scala) y cuándo un lote se rechaza está detallado en [`contracts/README.md`](contracts/README.md#quién-valida-qué).
 
@@ -377,7 +378,7 @@ go test ./...
 
 Las pruebas son de tres niveles:
 
-1. **Unitarias de cada módulo**: Scala (133 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
+1. **Unitarias de cada módulo**: Scala (138 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
 2. **Fixtures compartidos** (`contracts/fixtures/`): los usan los dos módulos, así que si el contrato cambia, ambos lo detectan. Hay una partida válida o más por juego, con escenarios que disparan cada patrón, y una partida inválida por juego donde cada evento `bad-*` rompe una regla distinta.
 3. **De punta a punta**: el CD levanta el sistema completo, corre el simulador y verifica que lleguen las 30 partidas a Scala pasando por Go (ver la [sección 11](#11-cicd-y-deployment)).
 
@@ -408,22 +409,22 @@ ghcr.io/gamestats-danny-dylan/gamestats-ingestion:<tag>
 
 con estos tags: el hash de cada commit, `latest` (lo último de `main`) y el nombre de cada versión. Una versión es fija: aunque después haya cambios en `main`, `v1.0` siempre es la misma.
 
-`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.2` (la que usa GameConsole, el Proyecto 2):
+`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.3` (la que usa GameConsole, el Proyecto 2):
 
 ```bash
-GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.2 docker compose -f docker-compose.deploy.yml up -d --wait
+GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.3 docker compose -f docker-compose.deploy.yml up -d --wait
 ```
 
-En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.2"; docker compose -f docker-compose.deploy.yml up -d --wait`.
+En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.3"; docker compose -f docker-compose.deploy.yml up -d --wait`.
 
 Para publicar una versión nueva:
 
 ```bash
-git tag v1.3
-git push origin v1.3
+git tag v1.4
+git push origin v1.4
 ```
 
-Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio; la `v1.2` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2)) agrega el reenvío a Scala (`reintentando`).
+Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio; la `v1.2` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.2)) agrega el reenvío a Scala (`reintentando`), y la `v1.3` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.3)) separa las partidas cortadas en la clasificación.
 
 ---
 
