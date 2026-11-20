@@ -43,7 +43,7 @@ Cada lenguaje se usa donde su paradigma aporta más: Go para manejar muchos even
 
 ## 2. Probarlo en 5 minutos
 
-Esta es la versión desplegada (`v1.0`). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
+Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.1`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
 
 - **Solo hace falta [Docker](https://www.docker.com/)** (en Windows y Mac, Docker Desktop abierto).
 - No hace falta Java, sbt ni Go, no se compila nada y no se necesita ningún archivo del repositorio.
@@ -333,6 +333,15 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 | `GET` | `/health` | `{"status":"ok"}` |
 | `POST` | `/events` | Recibe un evento (`{...}`) o varios (`[...]`); responde cuántos aceptó y el motivo de cada rechazo |
 | `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada`, `error_envio` o `abandonada` (sin eventos durante `IDLE_TIMEOUT`) |
+| `GET` | `/games` | **v1.1.** Partidas en curso por juego (`[{"gameId":"connect4","inProgress":2}, …]`). Es estado del flujo de Go, no una estadística: las estadísticas siguen en Scala |
+
+**Configuración de Go en v1.1** (variables de entorno; detalle en [`docs/ingestion-go.md`](docs/ingestion-go.md)):
+
+| Variable | Por defecto | Qué hace |
+|---|---|---|
+| `IDLE_TIMEOUT` | `2m` | Una partida sin eventos durante ese tiempo se cierra como `abandonada` (para los juegos sin tiempo propio) |
+| `IDLE_TIMEOUT_BY_GAME` | `tetris=1m,fighting=2m,connect4=15m` | Tiempo distinto por juego; reemplaza o agrega a los de por defecto (un juego por turnos puede pasar más tiempo quieto) |
+| `DATA_DIR` | vacío (sin persistencia) | Carpeta donde Go guarda las partidas en curso; si se reinicia, las retoma (en los compose es el volumen `ingestion-data`) |
 
 **Análisis (Scala, puerto 8081)**
 
@@ -387,11 +396,21 @@ El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que
 Las imágenes publicadas son:
 
 ```
-ghcr.io/danny7w7-coder/gamestats-analytics:<tag>
+ghcr.io/danny7w7-coder/gamestats-analytics:<tag>          ← v1.0, la entrega del Proyecto 1
 ghcr.io/danny7w7-coder/gamestats-ingestion:<tag>
+ghcr.io/gamestats-danny-dylan/gamestats-analytics:<tag>   ← v1.1 en adelante (el repo pasó a la organización)
+ghcr.io/gamestats-danny-dylan/gamestats-ingestion:<tag>
 ```
 
 con estos tags: el hash de cada commit, `latest` (lo último de `main`) y el nombre de cada versión. Una versión es fija: aunque después haya cambios en `main`, `v1.0` siempre es la misma.
+
+`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.1` (la que usa GameConsole, el Proyecto 2):
+
+```bash
+GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.1 docker compose -f docker-compose.deploy.yml up -d --wait
+```
+
+En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.1"; docker compose -f docker-compose.deploy.yml up -d --wait`.
 
 Para publicar una versión nueva:
 
@@ -400,7 +419,7 @@ git tag v1.1
 git push origin v1.1
 ```
 
-Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega es `v1.0`.
+Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio.
 
 ---
 
