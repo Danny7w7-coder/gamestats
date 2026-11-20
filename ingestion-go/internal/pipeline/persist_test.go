@@ -38,6 +38,18 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// waitGone espera hasta `limit` a que el archivo deje de existir.
+func waitGone(path string, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for fileExists(path) {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return true
+}
+
 // writeLines escribe a mano un archivo de partida (líneas JSON Lines).
 func writeLines(t *testing.T, path string, lines ...string) {
 	t.Helper()
@@ -131,7 +143,7 @@ func TestRestartMidMatch(t *testing.T) {
 	waitStatus(t, store, "M", state.StatusSent)
 	d2.Close()
 	<-done
-	if fileExists(persistPath(t, dir, "M")) {
+	if !waitGone(persistPath(t, dir, "M"), 2*time.Second) {
 		t.Fatal("el archivo de una partida enviada debe borrarse")
 	}
 }
@@ -216,7 +228,10 @@ func TestRestoredIdleMatchIsAbandoned(t *testing.T) {
 		t.Fatalf("Restored = %+v", r)
 	}
 	waitStatus(t, store, "T", state.StatusAbandoned)
-	if fileExists(tetris) {
+	// El estado cambia a abandonada justo antes de borrar el archivo: en una
+	// máquina lenta (el CI) la prueba puede mirar entre las dos cosas, así que
+	// se espera un poco a que el archivo desaparezca.
+	if !waitGone(tetris, 2*time.Second) {
 		t.Fatal("el archivo de una partida abandonada debe borrarse")
 	}
 	if status, _ := store.Status("C"); status != state.StatusInProgress {
@@ -256,7 +271,7 @@ func TestRestoredFinishedMatchIsSent(t *testing.T) {
 	waitStatus(t, store, "M", state.StatusSendError)
 	d.Close()
 	<-done
-	if fileExists(path) {
+	if !waitGone(path, 2*time.Second) {
 		t.Fatal("el archivo de una partida con error_envio debe borrarse")
 	}
 }
