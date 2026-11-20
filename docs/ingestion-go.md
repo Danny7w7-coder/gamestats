@@ -6,6 +6,8 @@ El módulo `ingestion-go/` es la puerta de entrada de GameStats. Recibe los even
 
 Go **no calcula estadísticas**: esa parte es de Scala. Tampoco interpreta el campo `data` de los eventos, que se reenvía intacto.
 
+**Contenido**
+
 - [Qué hace](#qué-hace)
 - [Juegos](#juegos)
 - [Cómo correrlo](#cómo-correrlo)
@@ -26,7 +28,7 @@ Go **no calcula estadísticas**: esa parte es de Scala. Tampoco interpreta el ca
 3. **Reparte** los eventos válidos por partida. Cada partida tiene su propia goroutine que acumula sus eventos.
 4. **Guarda el estado** de cada partida (estado, cantidad de eventos, jugadores conectados) para consultarlo en `GET /matches`.
 5. **Arma el lote** cuando llega `MATCH_FINISHED`: ordena los eventos por `timestamp` y calcula `startedAt`, `finishedAt` y `players`.
-6. **Envía el lote a Scala** con reintentos. La partida queda como `enviada` o `error_envio`.
+6. **Envía el lote a Scala** con reintentos. La partida queda como `enviada`; si Scala no responde, queda `reintentando` y se reenvía sola hasta que llegue; si Scala la rechaza (`4xx`), queda `error_envio`.
 
 Además incluye un **simulador** (`cmd/simulator`) que genera partidas realistas de los 4 juegos (racing, fighting, connect4 y tetris) y las manda al servidor, para probar el sistema completo.
 
@@ -83,7 +85,7 @@ go test ./...
 go test -race ./...   # necesita CGO (gcc); en Windows sin gcc se puede correr en Docker
 ```
 
-Para levantar todo el sistema (Go + Scala) con Docker, ver el [README principal](../README.md#cómo-correrlo).
+Para levantar todo el sistema (Go + Scala) con Docker, ver el [README principal](../README.md#2-probarlo-en-5-minutos).
 
 ### Variables de entorno
 
@@ -189,9 +191,15 @@ Estados de una partida:
 
 ```
 en_curso ──MATCH_FINISHED──▶ terminada ──Scala responde 2xx──▶ enviada
-   │                              └──────fallan los reintentos──▶ error_envio
+   │                              │                                ▲
+   │                              │                                │ Scala vuelve y responde 2xx
+   │                              ├──Scala no responde──▶ reintentando (se reenvía cada 30 s)
+   │                              │  (caído, timeout o 5xx)
+   │                              └──Scala rechaza el lote (4xx)──▶ error_envio
    └──timeout de su juego sin eventos──▶ abandonada (no se envía a Scala)
 ```
+
+`reintentando` no es un estado final: la partida sigue en camino a Scala (ver [Envío a Scala](#envío-a-scala)).
 
 Los jugadores conectados se actualizan con `PLAYER_JOINED` y `PLAYER_RECONNECTED` (entran) y con `PLAYER_LEFT` y `PLAYER_DISCONNECTED` (salen). El timeout de cada juego se explica en [Tiempo de espera por juego](#tiempo-de-espera-por-juego).
 
@@ -366,7 +374,7 @@ Sin `DATA_DIR`, el estado vive solo en memoria: un reinicio pierde las partidas 
 
 - **Al aceptar un evento**, el router lo agrega a `DATA_DIR/matches/<matchId>.jsonl` (una línea JSON por evento, en orden de llegada, con la hora del servidor) **antes** de que `POST /events` responda `200`. Si no se puede escribir, el evento se rechaza (`no se pudo guardar el evento en disco: ...`) y no entra al store. Un `matchId` que no sirve como nombre de archivo (mayúsculas, `/`, `..`, más de 100 caracteres) se guarda como `~<sha256 del matchId>.jsonl`.
 - **Al arrancar**, `pipeline.NewPersistent` lee todos los archivos y pasa sus eventos por la misma lógica que un evento nuevo (`Validate` y `dispatch`), pero sin volver a guardarlos. Así se reconstruyen el store (eventos, jugadores conectados, estado `en_curso`) y las goroutines de partida, y `GET /matches` y `GET /games` las muestran como antes del reinicio. El timeout de abandono de cada partida cuenta desde la hora de su **último evento guardado**: si el servidor estuvo apagado más que el timeout del juego, la partida se abandona en el primer tic del reloj.
-- **Al llegar a un estado final** (`enviada`, `abandonada` o `error_envio`), el archivo se borra. Lo hace el store (`MatchStore.OnFinal`), que es el único lugar por donde pasan esos estados, lo ponga el router o un sender.
+- **Al llegar a un estado final** (`enviada`, `abandonada` o `error_envio`), el archivo se borra. Lo hace el store (`MatchStore.OnFinal`), que es el único lugar por donde pasan esos estados, lo ponga el router o un sender. Una partida en `reintentando` **conserva** su archivo: si Go se reinicia antes de que Scala vuelva, al arrancar se restaura como terminada y se intenta enviar otra vez.
 - **Líneas corruptas** (por ejemplo, una línea cortada por un apagado brusco) se saltan con un aviso y el resto de la partida se restaura. Si a un archivo no le queda nada restaurable (por ejemplo, porque la línea corrupta era su `MATCH_STARTED`), se aparta como `<archivo>.descartado`, que ya no se carga pero queda para revisarlo.
 - **Una partida que ya tenía `MATCH_FINISHED`** guardado (el servidor se cayó antes de enviarla) se envía a Scala al arrancar.
 
@@ -398,7 +406,8 @@ volumes:
 - `go test -race ./...` corre todos los tests con el detector de data races. También corre en el CI (`.github/workflows/ci-go.yml`).
 - `pipeline/dispatcher_test.go` mezcla los eventos de dos partidas y comprueba que salen **dos** lotes separados y ordenados por `timestamp` (`TestTwoInterleavedMatches`). También prueba el evento tardío, el rechazo de una partida que no empezó con `MATCH_STARTED` (`TestUnknownMatchRejected`), los empates de `timestamp`, el cierre con una partida sin terminar, muchos `Submit` en paralelo (`TestConcurrentSubmit`), el abandono por inactividad (`TestIdleMatchIsAbandoned`), que una partida activa no se abandone (`TestActiveMatchIsNotAbandoned`) y los timeouts distintos por juego (`TestIdleTimeoutPerGame`, `TestIdleTimeoutDefaultForUnlistedGame`).
 - `pipeline/persist_test.go` reinicia el pipeline a mitad de partida y comprueba que la partida vuelve al store y sale **completa** hacia Scala, y que el archivo se borra al enviarla (`TestRestartMidMatch`); también la línea corrupta (`TestRestoreSkipsCorruptLine`), el archivo sin `MATCH_STARTED` (`TestRestoreWithoutMatchStarted`), el abandono de una partida restaurada que quedó inactiva (`TestRestoredIdleMatchIsAbandoned`), la partida restaurada que ya había terminado (`TestRestoredFinishedMatchIsSent`) y el fallo al escribir en disco (`TestPersistFailureRejectsEvent`). `api/handler_test.go` hace lo mismo por HTTP con `GET /matches` y `GET /games` (`TestRestartKeepsMatchesInProgress`) y `persist/journal_test.go` prueba el formato del archivo.
-- `pipeline/sender_test.go` comprueba que, al cerrar el pipeline, los lotes pendientes se envían igual a un Scala lento antes de que los senders terminen (`TestCloseSendsPendingBatches`).
+  `TestRetryingMatchSurvivesRestart` apaga Go con una partida en `reintentando` y comprueba que su archivo sigue ahí y que, al arrancar con Scala de vuelta, la partida llega completa y el archivo se borra.
+- `pipeline/sender_test.go` comprueba que, al cerrar el pipeline, los lotes pendientes se envían igual a un Scala lento antes de que los senders terminen (`TestCloseSendsPendingBatches`); que una partida que Scala no recibe queda `reintentando`, no frena a las demás y llega cuando Scala vuelve (`TestResendUntilScalaAnswers`); y que un reenvío pendiente no frena el apagado (`TestShutdownWithPendingResend`).
 - El simulador manda cada partida desde su propia goroutine, así que los eventos llegan intercalados al servidor.
 
 ## Envío a Scala
@@ -425,7 +434,7 @@ volumes:
 |---|---|
 | `2xx` | La partida queda `enviada` |
 | `4xx` | No reintenta (el lote está mal y mandarlo otra vez no lo arregla). Queda `error_envio` |
-| `5xx`, timeout o Scala caído | Reintenta hasta 3 veces, esperando 1 s, 2 s y 4 s. Si fallan todos, queda `error_envio` |
+| `5xx`, timeout o Scala caído | Reintenta hasta 3 veces, esperando 1 s, 2 s y 4 s. Si fallan todos, queda `reintentando` y **se reenvía cada 30 s, sin límite**, hasta que Scala responda |
 
 Ejemplo real del log con Scala apagado:
 
@@ -434,10 +443,14 @@ sender 2: enviando x (3 eventos) a Scala
 envío de x falló (... connection refused ...); reintento 1 de 3 en 1s
 envío de x falló (... connection refused ...); reintento 2 de 3 en 2s
 envío de x falló (... connection refused ...); reintento 3 de 3 en 4s
-sender 2: ERROR al enviar x: ...
+sender 2: x no llegó a Scala (... connection refused ...); se reenvía en 30s
 ```
 
-Mientras un sender espera un reintento, los otros `WORKERS - 1` siguen enviando las demás partidas.
+Mientras un sender hace los 3 reintentos rápidos, los otros `WORKERS - 1` siguen enviando las demás partidas.
+
+**Reenvío (`reintentando`).** La espera de 30 s (`pipeline.ResendEvery`) no ocupa a ningún sender: un temporizador (`time.AfterFunc`) devuelve el lote a los senders por un canal propio, y mientras tanto las partidas nuevas se envían normal. Que el estado no sea final tiene dos efectos: un evento tardío de esa partida se sigue rechazando como "partida ya finalizada", y con `DATA_DIR` su archivo se conserva hasta que llegue. Al apagarse Go, los reenvíos pendientes se sueltan sin esperar a Scala; con `DATA_DIR` esas partidas se envían al próximo arranque, sin `DATA_DIR` se pierden (el log lo dice).
+
+Se probó con el sistema real: con Scala apagado se mandaron las 30 partidas del simulador (quedaron en `reintentando`), se reinició Go (restauró las 30 con sus 2481 eventos) y al prender Scala llegaron todas en menos de 40 s, con los 2481 eventos, y `DATA_DIR` quedó vacía.
 
 ## Simulador
 

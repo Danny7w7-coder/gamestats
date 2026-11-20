@@ -3,6 +3,18 @@
 Contrato compartido entre `ingestion-go` (Go) y `analytics-scala` (Scala).
 Si algo de aquí cambia, cambia en `main` y ambos lo traen con `git pull origin main`.
 
+Es lo que necesita saber un sistema externo (por ejemplo, los juegos de [GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)) para mandarle eventos a GameStats sin conocer cómo está hecho por dentro.
+
+**Contenido**
+
+1. [Schemas (JSON Schema 2020-12)](#schemas-json-schema-2020-12): el formato de un evento, del lote que Go manda a Scala y del resultado
+2. [Catálogo de eventos](#catálogo-de-eventos): los tipos y las acciones de cada juego
+3. [Validaciones de contexto](#validaciones-de-contexto): las reglas que revisan que un evento tenga sentido dentro de su partida
+4. [Quién valida qué](#quién-valida-qué): qué revisa Go y qué revisa Scala
+5. [Fixtures](#fixtures): las partidas de ejemplo que usan las pruebas de los dos módulos
+
+---
+
 ## Schemas (JSON Schema 2020-12)
 
 | Archivo | Qué describe |
@@ -65,7 +77,7 @@ El schema valida cada evento por separado (tipos, rangos, enums, campos obligato
 
 - **Go** valida cada evento al recibirlo y rechaza solo ese evento: campos obligatorios, `timestamp` RFC3339, `gameId` y `type` conocidos, `action` solo en `PLAYER_ACTION`, y que la `action` no sea de **otro** juego (catálogo en `ingestion-go/internal/validation/catalog.go`). Una `action` que no existe en ningún juego **se acepta**: Go la anota como aviso en `logs/unknown/unknown_actions.jsonl` y en el campo `warnings` de la respuesta, y llega a Scala como `UnknownAction`. Así se puede agregar un evento nuevo sin tocar el sistema. Go **no** revisa `data`.
 - **Scala** rechaza el lote completo (`400`) solo por errores del lote: encabezado incompleto, `events` vacío, un evento sin `eventId`/`timestamp`/`type` válidos o de otra partida/juego, o `gameId` sin analyzer. Si una acción conocida trae `data` mal formada o rompe una validación de contexto, Scala **descarta ese evento**, lo registra en su log y analiza la partida igual. Una acción desconocida se cuenta en `eventsByAction` y no afecta el resto.
-- Ante un `4xx` Go no reintenta (la partida queda como `error_envio`); ante `5xx` o timeout reintenta 3 veces (1, 2 y 4 s). Scala solo responde `500` si no puede guardar el resultado.
+- Ante un `4xx` Go no reintenta (la partida queda como `error_envio`); ante `5xx`, timeout o Scala caído reintenta 3 veces (1, 2 y 4 s) y, si siguen fallando, la partida queda como `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba. Scala solo responde `500` si no puede guardar el resultado. Como un lote puede llegar dos veces (por ejemplo, si Go se cae justo después del `2xx`), Scala guarda un resultado por `matchId`.
 
 ## Fixtures
 

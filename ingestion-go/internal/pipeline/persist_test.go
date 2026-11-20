@@ -122,7 +122,7 @@ func TestRestartMidMatch(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		RunSenders(1, d2.Out(), client.New(scala.URL), store)
+		RunSenders(1, d2.Out(), client.New(scala.URL), store, time.Hour)
 		close(done)
 	}()
 
@@ -244,8 +244,8 @@ func TestRestoredIdleMatchIsAbandoned(t *testing.T) {
 }
 
 // Si el servidor se cayó después de guardar MATCH_FINISHED pero antes de
-// enviar el lote, al arrancar la partida sale hacia Scala. Si Scala responde
-// error, queda error_envio y el archivo también se borra.
+// enviar el lote, al arrancar la partida sale hacia Scala. Si Scala la
+// rechaza (4xx), queda error_envio y el archivo también se borra.
 func TestRestoredFinishedMatchIsSent(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
@@ -265,7 +265,7 @@ func TestRestoredFinishedMatchIsSent(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		RunSenders(1, d.Out(), client.New(scala.URL), store)
+		RunSenders(1, d.Out(), client.New(scala.URL), store, time.Hour)
 		close(done)
 	}()
 	waitStatus(t, store, "M", state.StatusSendError)
@@ -273,6 +273,62 @@ func TestRestoredFinishedMatchIsSent(t *testing.T) {
 	<-done
 	if !waitGone(path, 2*time.Second) {
 		t.Fatal("el archivo de una partida con error_envio debe borrarse")
+	}
+}
+
+// Scala caído cuando termina una partida: queda reintentando y su archivo NO
+// se borra. Si Go se apaga antes de que Scala vuelva, al arrancar otra vez la
+// partida se restaura y se envía; recién ahí el archivo se borra.
+func TestRetryingMatchSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := persistPath(t, dir, "M")
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer down.Close()
+
+	store, d, _, _ := startPersistent(t, dir, Uniform(time.Hour))
+	done := make(chan struct{})
+	go func() {
+		RunSenders(1, d.Out(), fastClient(down.URL), store, time.Hour)
+		close(done)
+	}()
+	d.Submit(ev("e1", "M", "2026-10-05T14:00:00Z", "MATCH_STARTED", ""))
+	d.Submit(ev("e2", "M", "2026-10-05T14:05:00Z", "MATCH_FINISHED", ""))
+	waitStatus(t, store, "M", state.StatusRetrying)
+	d.Close()
+	<-done
+	if !fileExists(path) {
+		t.Fatal("el archivo de una partida en reintentando no debe borrarse")
+	}
+
+	// Segunda ejecución, con Scala de vuelta.
+	sent := make(chan model.Batch, 1)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b model.Batch
+		json.NewDecoder(r.Body).Decode(&b)
+		sent <- b
+	}))
+	defer up.Close()
+
+	store2, d2, _, r := startPersistent(t, dir, Uniform(time.Hour))
+	if want := (Restored{Finished: 1, Events: 2}); r != want {
+		t.Fatalf("Restored = %+v, se esperaba %+v", r, want)
+	}
+	done2 := make(chan struct{})
+	go func() {
+		RunSenders(1, d2.Out(), fastClient(up.URL), store2, time.Hour)
+		close(done2)
+	}()
+	if b := <-sent; !reflect.DeepEqual(eventIDs(b.Events), []string{"e1", "e2"}) {
+		t.Fatalf("lote reenviado = %v", eventIDs(b.Events))
+	}
+	waitStatus(t, store2, "M", state.StatusSent)
+	d2.Close()
+	<-done2
+	if !waitGone(path, 2*time.Second) {
+		t.Fatal("el archivo debe borrarse cuando la partida por fin llega a Scala")
 	}
 }
 

@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -43,9 +44,7 @@ func fakeScala(t *testing.T, statuses ...int) (*httptest.Server, *atomic.Int32) 
 
 // newTestClient usa esperas cortas para que los tests sean rápidos.
 func newTestClient(url string) *ScalaClient {
-	c := New(url)
-	c.backoff = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
-	return c
+	return New(url).WithBackoff(time.Millisecond, 2*time.Millisecond, 4*time.Millisecond)
 }
 
 func TestSend(t *testing.T) {
@@ -53,12 +52,13 @@ func TestSend(t *testing.T) {
 		name         string
 		statuses     []int
 		wantErr      bool
+		wantRejected bool // el error dice que reenviar no sirve (ErrRejected)
 		wantAttempts int32
 	}{
-		{"éxito al primer intento", []int{200}, false, 1},
-		{"fallo transitorio que se recupera", []int{503, 500, 200}, false, 3},
-		{"fallo total: 1 intento + 3 reintentos", []int{503}, true, 4},
-		{"4xx no se reintenta", []int{400}, true, 1},
+		{"éxito al primer intento", []int{200}, false, false, 1},
+		{"fallo transitorio que se recupera", []int{503, 500, 200}, false, false, 3},
+		{"fallo total: 1 intento + 3 reintentos", []int{503}, true, false, 4},
+		{"4xx no se reintenta", []int{400}, true, true, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,6 +67,9 @@ func TestSend(t *testing.T) {
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, se esperaba error: %v", err, tt.wantErr)
+			}
+			if got := errors.Is(err, ErrRejected); got != tt.wantRejected {
+				t.Fatalf("errors.Is(err, ErrRejected) = %v, se esperaba %v (err = %v)", got, tt.wantRejected, err)
 			}
 			if got := attempts.Load(); got != tt.wantAttempts {
 				t.Fatalf("intentos = %d, se esperaban %d", got, tt.wantAttempts)
@@ -101,7 +104,11 @@ func TestSendScalaDown(t *testing.T) {
 	url := srv.URL
 	srv.Close() // ya no escucha nadie en esa dirección
 
-	if err := newTestClient(url).Send(testBatch); err == nil {
+	err := newTestClient(url).Send(testBatch)
+	if err == nil {
 		t.Fatal("se esperaba error con Scala apagado")
+	}
+	if errors.Is(err, ErrRejected) {
+		t.Fatalf("Scala apagado no es un rechazo: el lote se debe poder reenviar (err = %v)", err)
 	}
 }

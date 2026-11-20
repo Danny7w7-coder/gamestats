@@ -4,6 +4,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,11 @@ import (
 
 	"gamestats/ingestion/internal/model"
 )
+
+// ErrRejected envuelve los errores que no se arreglan reenviando el lote:
+// Scala respondió 4xx (el lote está mal) o el lote no se pudo convertir a
+// JSON. Con errors.Is(err, ErrRejected) el sender sabe que no debe reintentar.
+var ErrRejected = errors.New("Scala no acepta el lote")
 
 // ScalaClient hace POST {SCALA_URL}/analyze con reintentos.
 type ScalaClient struct {
@@ -33,13 +39,21 @@ func New(baseURL string) *ScalaClient {
 	}
 }
 
+// WithBackoff cambia las esperas entre reintentos (las pruebas usan esperas
+// cortas). Devuelve el mismo cliente para poder encadenarlo con New.
+func (c *ScalaClient) WithBackoff(waits ...time.Duration) *ScalaClient {
+	c.backoff = waits
+	return c
+}
+
 // Send envía el lote. Si falla por red, timeout o un 5xx, reintenta hasta 3
 // veces esperando cada vez más. Un 4xx no se reintenta: significa que el lote
-// está mal y mandarlo de nuevo no lo arregla. Devuelve nil si Scala lo aceptó.
+// está mal y mandarlo de nuevo no lo arregla (el error envuelve ErrRejected).
+// Devuelve nil si Scala lo aceptó.
 func (c *ScalaClient) Send(b model.Batch) error {
 	body, err := json.Marshal(b)
 	if err != nil {
-		return fmt.Errorf("no se pudo convertir el lote a JSON: %w", err)
+		return fmt.Errorf("%w: no se pudo convertir a JSON: %v", ErrRejected, err)
 	}
 
 	retry, err := c.post(body)
@@ -69,7 +83,7 @@ func (c *ScalaClient) post(body []byte) (retry bool, err error) {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return false, nil
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		return false, fmt.Errorf("Scala rechazó el lote: %s", resp.Status)
+		return false, fmt.Errorf("%w: Scala respondió %s", ErrRejected, resp.Status)
 	default:
 		return true, fmt.Errorf("Scala respondió %s", resp.Status)
 	}

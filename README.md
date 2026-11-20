@@ -39,11 +39,19 @@ Se divide en dos servicios independientes que se comunican por HTTP con JSON:
 
 Cada lenguaje se usa donde su paradigma aporta más: Go para manejar muchos eventos concurrentes con goroutines y canales, y Scala para transformar colecciones de eventos en estadísticas sin estado mutable.
 
+### Versiones
+
+| Versión | Qué es |
+|---|---|
+| [`v1.0`](https://github.com/GameStats-Danny-Dylan/gamestats/tree/v1.0) | La entrega del **Proyecto 1**: los eventos los genera un simulador |
+| [`v1.1`](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1) | La que usa **[GameConsole](https://github.com/GameStats-Danny-Dylan/gameconsole)** (Proyecto 2), donde los eventos los generan juegos de verdad. Agrega estadísticas por juego y generales, partidas en curso por juego, juegos nuevos sin cambiar el código, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio de Go. El contrato de eventos es el mismo |
+| `main` (próxima `v1.2`) | Una partida que no llega a Scala ya no se pierde: queda `reintentando` y Go la reenvía cada 30 s hasta que Scala la reciba |
+
 ---
 
 ## 2. Probarlo en 5 minutos
 
-Esta es la versión desplegada (`v1.0`). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
+Esta es la versión desplegada de la entrega (`v1.0`). Para la `v1.1`, la que usa GameConsole, ver [Deployment](#deployment). Las imágenes ya construidas se descargan de GitHub Container Registry, así que:
 
 - **Solo hace falta [Docker](https://www.docker.com/)** (en Windows y Mac, Docker Desktop abierto).
 - No hace falta Java, sbt ni Go, no se compila nada y no se necesita ningún archivo del repositorio.
@@ -121,9 +129,9 @@ flowchart LR
 ```
 
 1. Los eventos llegan a `POST /events` del servicio Go. Cada evento se valida por separado: uno inválido se rechaza (y se anota en un log) sin afectar a los demás.
-2. Go agrupa los eventos por `matchId`. Cuando llega `MATCH_FINISHED`, ordena los eventos por `timestamp` y envía la partida completa a Scala. Si Scala no responde o responde `5xx`, reintenta 3 veces (1, 2 y 4 s).
+2. Go agrupa los eventos por `matchId`. Cuando llega `MATCH_FINISHED`, ordena los eventos por `timestamp` y envía la partida completa a Scala. Si Scala no responde o responde `5xx`, reintenta 3 veces (1, 2 y 4 s) y, si sigue sin responder, deja la partida en `reintentando` y la reenvía cada 30 s hasta que Scala la reciba (con `DATA_DIR`, aunque Go se reinicie en el medio).
 3. Scala valida el lote en dos pasos: el formato de cada evento y su `data`, y después la coherencia con el resto de la partida (validaciones de contexto). Los eventos inválidos se descartan y quedan en el log. Luego elige el analizador del juego (`racing`, `fighting`, `connect4` o `tetris`), calcula las estadísticas, aplica las reglas de patrones y guarda el resultado en memoria y en un archivo JSON por partida.
-4. Los resultados se consultan en `GET /results` y `GET /players/{playerId}`.
+4. Los resultados se consultan en Scala con `GET /results`, `GET /players/{playerId}` y, desde la v1.1, `GET /stats/overview` y `GET /stats/games/{gameId}`. Go muestra el estado de cada partida (`GET /matches`) y, desde la v1.1, cuántas hay en curso por juego (`GET /games`). La lista completa está en la [sección 9](#9-endpoints).
 
 Se eligió HTTP entre los dos servicios porque cada envío devuelve una respuesta inmediata, con la que Go decide si la partida quedó enviada o si reintenta. La comparación con archivos compartidos o mensajería está en [`docs/imperativo-vs-funcional.md`](docs/imperativo-vs-funcional.md#por-qué-http-entre-go-y-scala).
 
@@ -318,7 +326,11 @@ docker load -i gamestats.tar
 | ingestion | `PORT` | `8080` | Puerto HTTP |
 | ingestion | `SCALA_URL` | `http://localhost:8081` | Dirección del servicio de análisis |
 | ingestion | `WORKERS` | `4` | Cuántos envíos a Scala en paralelo |
-| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala |
+| ingestion | `IDLE_TIMEOUT` | `2m` | Inactividad tras la cual una partida se da por abandonada y no se envía a Scala (para los juegos sin tiempo propio) |
+| ingestion | `IDLE_TIMEOUT_BY_GAME` | `tetris=1m,fighting=2m,connect4=15m` | **v1.1.** Tiempo distinto por juego; reemplaza o agrega a los de por defecto (un juego por turnos puede pasar más tiempo quieto) |
+| ingestion | `DATA_DIR` | vacío (sin persistencia) | **v1.1.** Carpeta donde Go guarda las partidas en curso; si se reinicia, las retoma (en los compose es el volumen `ingestion-data`) |
+
+El detalle de cada variable de Go está en [`docs/ingestion-go.md`](docs/ingestion-go.md).
 
 ---
 
@@ -332,7 +344,8 @@ En Windows (PowerShell) se puede usar `curl.exe` en lugar de `curl`, o abrir las
 |---|---|---|
 | `GET` | `/health` | `{"status":"ok"}` |
 | `POST` | `/events` | Recibe un evento (`{...}`) o varios (`[...]`); responde cuántos aceptó y el motivo de cada rechazo |
-| `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada`, `error_envio` o `abandonada` (sin eventos durante `IDLE_TIMEOUT`) |
+| `GET` | `/matches` | Estado de cada partida: `en_curso`, `terminada`, `enviada`, `reintentando` (Scala no respondió; se reenvía cada 30 s hasta que llegue), `error_envio` (Scala rechazó el lote) o `abandonada` (sin eventos durante `IDLE_TIMEOUT`) |
+| `GET` | `/games` | **v1.1.** Partidas en curso por juego (`[{"gameId":"connect4","inProgress":2}, …]`). Es estado del flujo de Go, no una estadística: las estadísticas siguen en Scala |
 
 **Análisis (Scala, puerto 8081)**
 
@@ -364,7 +377,7 @@ go test ./...
 
 Las pruebas son de tres niveles:
 
-1. **Unitarias de cada módulo**: Scala (117 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
+1. **Unitarias de cada módulo**: Scala (133 tests) y Go (`go test -race`, que también detecta problemas de concurrencia).
 2. **Fixtures compartidos** (`contracts/fixtures/`): los usan los dos módulos, así que si el contrato cambia, ambos lo detectan. Hay una partida válida o más por juego, con escenarios que disparan cada patrón, y una partida inválida por juego donde cada evento `bad-*` rompe una regla distinta.
 3. **De punta a punta**: el CD levanta el sistema completo, corre el simulador y verifica que lleguen las 30 partidas a Scala pasando por Go (ver la [sección 11](#11-cicd-y-deployment)).
 
@@ -387,20 +400,30 @@ El CD construye, prueba y publica cada versión, y el job `deploy` comprueba que
 Las imágenes publicadas son:
 
 ```
-ghcr.io/danny7w7-coder/gamestats-analytics:<tag>
+ghcr.io/danny7w7-coder/gamestats-analytics:<tag>          ← v1.0, la entrega del Proyecto 1
 ghcr.io/danny7w7-coder/gamestats-ingestion:<tag>
+ghcr.io/gamestats-danny-dylan/gamestats-analytics:<tag>   ← v1.1 en adelante (el repo pasó a la organización)
+ghcr.io/gamestats-danny-dylan/gamestats-ingestion:<tag>
 ```
 
 con estos tags: el hash de cada commit, `latest` (lo último de `main`) y el nombre de cada versión. Una versión es fija: aunque después haya cambios en `main`, `v1.0` siempre es la misma.
 
+`docker-compose.deploy.yml` elige la cuenta con `GAMESTATS_OWNER` y la versión con `GAMESTATS_TAG`. Sin variables levanta la `v1.0` del Proyecto 1; para la `v1.1` (la que usa GameConsole, el Proyecto 2):
+
+```bash
+GAMESTATS_OWNER=gamestats-danny-dylan GAMESTATS_TAG=v1.1 docker compose -f docker-compose.deploy.yml up -d --wait
+```
+
+En PowerShell: `$env:GAMESTATS_OWNER="gamestats-danny-dylan"; $env:GAMESTATS_TAG="v1.1"; docker compose -f docker-compose.deploy.yml up -d --wait`.
+
 Para publicar una versión nueva:
 
 ```bash
-git tag v1.1
-git push origin v1.1
+git tag v1.2
+git push origin v1.2
 ```
 
-Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega es `v1.0`.
+Eso dispara el CD con los tres jobs y publica las imágenes con ese nombre. La versión de la entrega del Proyecto 1 es `v1.0`; la `v1.1` ([release](https://github.com/GameStats-Danny-Dylan/gamestats/releases/tag/v1.1)) agrega lo que necesita GameConsole: estadísticas por juego y generales, `GET /games`, `gameId` abierto, tiempo de espera por juego y partidas en curso que sobreviven a un reinicio.
 
 ---
 
