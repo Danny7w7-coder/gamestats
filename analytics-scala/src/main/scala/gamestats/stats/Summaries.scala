@@ -55,16 +55,19 @@ object Summaries:
       .groupMap(_._1)(_._2)
     byPlayer.toList
       .map { (playerId, games) =>
-        val results = games.map((m, _) => m.matchStats.winner)
-        val wins     = results.count(_.contains(playerId))
-        val noResult = results.count(_.isEmpty)
-        val played   = games.size
+        val results = games.map((m, _) => m.matchStats)
+        val wins        = results.count(_.winner.contains(playerId))
+        // Sin ganador, separadas: cortadas (se cerraron antes) y jugadas hasta el final.
+        val interrupted = results.count(s => s.winner.isEmpty && s.interrupted)
+        val noResult    = results.count(s => s.winner.isEmpty && !s.interrupted)
+        val played      = games.size
         Standing(
           playerId = playerId,
           played = played,
           wins = wins,
-          losses = played - wins - noResult,
+          losses = played - wins - noResult - interrupted,
           noResult = noResult,
+          interrupted = interrupted,
           winRate = round2(wins.toDouble / played),
           metrics = if withMetrics then summarize(games.map(_._2)) else Map.empty
         )

@@ -18,7 +18,11 @@
         "eventsByAction":  { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "winner": {
           "type": ["string", "null"],
-          "description": "racing: playerId (ranking.head). fighting: playerId con más rounds ganados. connect4: playerId que hizo CONNECT_FOUR. tetris: siempre null (un solo jugador). Empate o sin datos: null."
+          "description": "racing: playerId (ranking.head). fighting: playerId con más rounds ganados, si la pelea se decidió (mayoría o todos los rounds jugados). connect4: playerId que hizo CONNECT_FOUR. tetris: siempre null (un solo jugador). Empate, partida cortada o sin datos: null."
+        },
+        "interrupted": {
+          "type": "boolean",
+          "description": "v1.3: la partida se cerró antes de terminar (MATCH_FINISHED.data.reason = stopped, o MATCH_FINISHED sin reason después de un PLAYER_LEFT). Los resultados anteriores no lo traen: se toma como false."
         }
       }
     },

@@ -80,11 +80,20 @@ object FightingAnalyzer extends GameAnalyzer:
   def roundWinners(batch: MatchBatch): List[(Int, String)] =
     batch.events.collect { case Event(_, _, _, _, _, Some(p), _, Some(RoundWon(r, _, _)), _) => r -> p }
 
-  /** Gana el que más rounds ganó; empate o sin rounds -> None. */
+  /** Gana el que más rounds ganó, pero solo si la pelea se decidió: llegó a la
+    * mayoría (2 de 3, 3 de 5) o se jugaron todos los rounds (MATCH_STARTED.data.rounds).
+    * Una pelea cortada a la mitad (se cerró ganando 1 de 3) no tiene ganador.
+    * Empate en rounds o sin rounds -> None. Sin `rounds` en MATCH_STARTED, se
+    * toma como decidida (lo de antes: el que más rounds ganó).
+    */
   def winner(batch: MatchBatch): Option[String] =
     val wins = roundWinners(batch).groupMapReduce(_._2)(_ => 1)(_ + _) // jugador -> rounds ganados
-    wins.values.maxOption.flatMap { best =>
+    val leader = wins.values.maxOption.flatMap { best =>
       wins.collect { case (p, n) if n == best => p }.toList match
         case List(p) => Some(p)
         case _       => None
     }
+    val start   = FightingCheck.initial(batch)
+    val played  = batch.events.flatMap(_.action).collect { case RoundWon(r, _, _) => r; case RoundDraw(r, _, _) => r }.distinct.size
+    val decided = (p: String) => wins(p) >= FightingCheck.roundsToWin(start) || start.rounds.forall(played >= _)
+    leader.filter(decided)

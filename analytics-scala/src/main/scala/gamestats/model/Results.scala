@@ -2,13 +2,17 @@ package gamestats.model
 
 /** Estadísticas de la partida. `winner` es Option porque no siempre hay
   * ganador: empate, partida sin datos o tetris (que se juega solo).
+  * `interrupted` (v1.3): la partida se cerró antes de terminar (ver
+  * GenericStats.interrupted); los resultados guardados antes no lo traen y se
+  * leen como `false`.
   */
 case class MatchStats(
     durationSeconds: Long,
     totalEvents: Int,
     playerCount: Int,
     eventsByAction: Map[String, Int],
-    winner: Option[String]
+    winner: Option[String],
+    interrupted: Boolean = false
 )
 
 /** Métricas por nombre: cada juego decide cuáles calcula sin cambiar el modelo. */

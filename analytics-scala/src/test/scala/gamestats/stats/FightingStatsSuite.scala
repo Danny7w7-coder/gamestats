@@ -66,6 +66,24 @@ class FightingStatsSuite extends munit.FunSuite:
     val oneEach = b.copy(events = b.events.filterNot(_.action.exists { case RoundWon(3, _, _) => true; case _ => false }))
     assertEquals(FightingAnalyzer.winner(oneEach), None)
 
+  test("pelea cortada a la mitad (se cerró ganando 1 de 3) -> sin ganador"):
+    val b = validated("fighting_comeback.json")
+    // Hasta el final del round 1 (lo gana p3) y después se cierra: PLAYER_LEFT y MATCH_FINISHED.
+    val upToRound1 = b.events.takeWhile(e => !e.action.exists { case RoundWon(1, _, _) => true; case _ => false })
+    val round1 = b.events.find(_.action.exists { case RoundWon(1, _, _) => true; case _ => false }).toList
+    val closed = b.copy(events = upToRound1 ++ round1 :+ b.events.last)
+    assertEquals(FightingAnalyzer.roundWinners(closed), List(1 -> "p3"))
+    assertEquals(FightingAnalyzer.winner(closed), None)
+
+  test("se jugaron todos los rounds sin llegar a la mayoría (1 ganado y 2 empates) -> gana el que más ganó"):
+    val b = validated("fighting_comeback.json")
+    val draws = b.events.map { e =>
+      e.action match
+        case Some(RoundWon(r, _, _)) if r >= 2 => e.copy(action = Some(RoundDraw(r, DrawMethod.DoubleKo, "p3")))
+        case _                                 => e
+    }
+    assertEquals(FightingAnalyzer.winner(b.copy(events = draws)), Some("p3"))
+
   test("precisión: un combo cuenta sus golpes, aunque no haya ATTACK sueltos"):
     val solo = FightingAnalyzer.accuracy(List(
       Event("e1", java.time.Instant.EPOCH, "fighting", "1.0", "m", Some("p1"), EventType.PlayerAction,
