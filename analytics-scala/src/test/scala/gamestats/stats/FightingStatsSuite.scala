@@ -68,7 +68,8 @@ class FightingStatsSuite extends munit.FunSuite:
 
   test("pelea cortada a la mitad (se cerró ganando 1 de 3) -> sin ganador"):
     val b = validated("fighting_comeback.json")
-    // Hasta el final del round 1 (lo gana p3) y después se cierra: PLAYER_LEFT y MATCH_FINISHED.
+    // Hasta el final del round 1 (lo gana p3) y después el MATCH_FINISHED: la pelea quedó
+    // a la mitad (el ganador no depende de los PLAYER_LEFT, por eso no hacen falta aquí).
     val upToRound1 = b.events.takeWhile(e => !e.action.exists { case RoundWon(1, _, _) => true; case _ => false })
     val round1 = b.events.find(_.action.exists { case RoundWon(1, _, _) => true; case _ => false }).toList
     val closed = b.copy(events = upToRound1 ++ round1 :+ b.events.last)
